@@ -16,14 +16,14 @@ namespace Nyxara.AICompanion.Core
         public void SetupCompleteCompanion()
         {
             var brain = GetComponent<NyxaraCompanionBrain>() ?? gameObject.AddComponent<NyxaraCompanionBrain>();
-            var agent = GetComponent<LLMAgent>() ?? gameObject.AddComponent<LLMAgent>();
-            var tts = GetComponent<PiperTtsService>() ?? gameObject.AddComponent<PiperTtsService>();
-            var audioSource = GetComponent<AudioSource>() ?? gameObject.AddComponent<AudioSource>();
-            var faceDriver = GetComponent<ArkItBlendshapeDriver>() ?? gameObject.AddComponent<ArkItBlendshapeDriver>();
-            var signalRouter = GetComponent<ExpressionSignalRouter>() ?? gameObject.AddComponent<ExpressionSignalRouter>();
-            var memory = GetComponent<RecentMemoryController>() ?? gameObject.AddComponent<RecentMemoryController>();
-            var gatekeeper = GetComponent<ActionGatekeeper>() ?? gameObject.AddComponent<ActionGatekeeper>();
-            var executor = GetComponent<CompanionActionExecutor>() ?? gameObject.AddComponent<CompanionActionExecutor>();
+            var agent = GetComponent<LLMAgent>() ?? GetComponentInChildren<LLMAgent>(true) ?? gameObject.AddComponent<LLMAgent>();
+            var tts = GetComponent<PiperTtsService>() ?? GetComponentInChildren<PiperTtsService>(true) ?? gameObject.AddComponent<PiperTtsService>();
+            var audioSource = GetComponent<AudioSource>() ?? GetComponentInChildren<AudioSource>(true) ?? gameObject.AddComponent<AudioSource>();
+            var faceDriver = GetComponent<ArkItBlendshapeDriver>() ?? GetComponentInChildren<ArkItBlendshapeDriver>(true) ?? gameObject.AddComponent<ArkItBlendshapeDriver>();
+            var signalRouter = GetComponent<ExpressionSignalRouter>() ?? GetComponentInChildren<ExpressionSignalRouter>(true) ?? gameObject.AddComponent<ExpressionSignalRouter>();
+            var memory = GetComponent<RecentMemoryController>() ?? GetComponentInChildren<RecentMemoryController>(true) ?? gameObject.AddComponent<RecentMemoryController>();
+            var gatekeeper = GetComponent<ActionGatekeeper>() ?? GetComponentInChildren<ActionGatekeeper>(true) ?? gameObject.AddComponent<ActionGatekeeper>();
+            var executor = GetComponent<CompanionActionExecutor>() ?? GetComponentInChildren<CompanionActionExecutor>(true) ?? gameObject.AddComponent<CompanionActionExecutor>();
 
             AssignObjectReference(brain, "agent", agent);
             AssignObjectReference(brain, "ttsService", tts);
