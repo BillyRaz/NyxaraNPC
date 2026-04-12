@@ -37,10 +37,16 @@ Packages/packages-lock.json
 
 # Local AI assets and generated audio
 Assets/StreamingAssets/Models/*.gguf
+Assets/StreamingAssets/Models/*.gguf.meta
 Assets/StreamingAssets/Speech/PiperVoices/*.onnx
+Assets/StreamingAssets/Speech/PiperVoices/*.onnx.meta
 Assets/StreamingAssets/Speech/PiperVoices/*.json
+Assets/StreamingAssets/Speech/PiperVoices/*.json.meta
 Assets/StreamingAssets/Speech/*.bin
+Assets/StreamingAssets/Speech/*.bin.meta
 Assets/StreamingAssets/Speech/*.wav
+Assets/StreamingAssets/LlamaLib-v*/
+Assets/StreamingAssets/LlamaLib-v*.meta
 
 # External cloned dependencies and downloads
 External/Repos/
