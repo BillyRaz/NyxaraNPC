@@ -1,5 +1,7 @@
 #if UNITY_EDITOR
 using System.IO;
+using System.Collections.Generic;
+using System.Linq;
 using LLMUnity;
 using Nyxara.AICompanion.Configuration;
 using Nyxara.AICompanion.Core;
@@ -111,6 +113,7 @@ namespace Nyxara.AICompanion.Editor
             }
 
             var faceRenderer = ResolveFaceRenderer(config, characterInstance);
+            var additionalFaceRenderers = CollectAdditionalFaceRenderers(characterInstance, faceRenderer);
             if (config.createStudioEnvironment)
             {
                 CreateStudioEnvironment(config, root, characterRoot.transform, faceRenderer);
@@ -118,14 +121,17 @@ namespace Nyxara.AICompanion.Editor
 
             AssignObjectReference(faceDriver, "targetRenderer", faceRenderer);
             AssignObjectReference(signalRouter, "targetRenderer", faceRenderer);
+            AssignObjectReferenceList(faceDriver, "additionalRenderers", additionalFaceRenderers);
             AssignObjectReference(tts, "faceDriver", faceDriver);
             AssignObjectReference(tts, "lipSyncController", lipSyncController);
             AssignObjectReference(actionGatekeeper, "actionExecutor", actionExecutor);
             AssignObjectReference(actionExecutor, "companionTransform", root.transform);
             AssignObjectReference(actionExecutor, "playerTransform", config.playerTransform);
             AssignObjectReference(expressionLibrary, "targetFaceRenderer", faceRenderer);
+            AssignObjectReferenceList(expressionLibrary, "additionalFaceRenderers", additionalFaceRenderers);
             AssignStringField(expressionLibrary, "expressionLibraryPath", config.expressionFolder);
             AssignObjectReference(lipSyncController, "faceRenderer", faceRenderer);
+            AssignObjectReferenceList(lipSyncController, "additionalFaceRenderers", additionalFaceRenderers);
             AssignObjectReference(lipSyncController, "phonemeExtractor", phonemeExtractor);
             AssignObjectReference(lipSyncController, "audioSource", audioSource);
             AssignStringField(phonemeExtractor, "piperExecutablePath", ResolveAbsoluteOrProjectPath(config.piperExecutablePath));
@@ -201,6 +207,7 @@ namespace Nyxara.AICompanion.Editor
             }
 
             var faceRenderer = ResolveFaceRenderer(config, characterInstance != null ? characterInstance.gameObject : null);
+            var additionalFaceRenderers = CollectAdditionalFaceRenderers(characterInstance != null ? characterInstance.gameObject : null, faceRenderer);
             if (config.createStudioEnvironment)
             {
                 CreateStudioEnvironment(config, root, characterRoot, faceRenderer);
@@ -216,18 +223,21 @@ namespace Nyxara.AICompanion.Editor
             if (faceDriver != null)
             {
                 AssignObjectReference(faceDriver, "targetRenderer", faceRenderer);
+                AssignObjectReferenceList(faceDriver, "additionalRenderers", additionalFaceRenderers);
             }
 
             var expressionLibrary = root.GetComponent<ExpressionLibraryManager>();
             if (expressionLibrary != null)
             {
                 AssignObjectReference(expressionLibrary, "targetFaceRenderer", faceRenderer);
+                AssignObjectReferenceList(expressionLibrary, "additionalFaceRenderers", additionalFaceRenderers);
             }
 
             var lipSyncController = root.GetComponent<VisemeLipSyncController>();
             if (lipSyncController != null)
             {
                 AssignObjectReference(lipSyncController, "faceRenderer", faceRenderer);
+                AssignObjectReferenceList(lipSyncController, "additionalFaceRenderers", additionalFaceRenderers);
             }
         }
 
@@ -303,6 +313,73 @@ namespace Nyxara.AICompanion.Editor
             }
 
             return characterInstance.GetComponentInChildren<SkinnedMeshRenderer>();
+        }
+
+        private static List<SkinnedMeshRenderer> CollectAdditionalFaceRenderers(GameObject characterInstance, SkinnedMeshRenderer primaryRenderer)
+        {
+            var results = new List<SkinnedMeshRenderer>();
+            if (characterInstance == null)
+            {
+                return results;
+            }
+
+            var renderers = characterInstance.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+            var primaryBlendshapes = new HashSet<string>();
+            if (primaryRenderer != null && primaryRenderer.sharedMesh != null)
+            {
+                for (var i = 0; i < primaryRenderer.sharedMesh.blendShapeCount; i++)
+                {
+                    primaryBlendshapes.Add(primaryRenderer.sharedMesh.GetBlendShapeName(i));
+                }
+            }
+
+            foreach (var renderer in renderers)
+            {
+                if (renderer == null || renderer == primaryRenderer || renderer.sharedMesh == null)
+                {
+                    continue;
+                }
+
+                if (LooksLikeRelatedFaceRenderer(renderer, primaryBlendshapes))
+                {
+                    results.Add(renderer);
+                }
+            }
+
+            return results;
+        }
+
+        private static bool LooksLikeRelatedFaceRenderer(SkinnedMeshRenderer renderer, HashSet<string> primaryBlendshapes)
+        {
+            var transformName = renderer.transform.name.ToLowerInvariant();
+            var meshName = (renderer.sharedMesh != null ? renderer.sharedMesh.name : string.Empty).ToLowerInvariant();
+            var likelyFaceName =
+                transformName.Contains("lash") ||
+                transformName.Contains("eye") ||
+                transformName.Contains("brow") ||
+                transformName.Contains("mouth") ||
+                transformName.Contains("teeth") ||
+                meshName.Contains("lash") ||
+                meshName.Contains("eye") ||
+                meshName.Contains("brow") ||
+                meshName.Contains("mouth") ||
+                meshName.Contains("teeth");
+
+            var hasBlendshapeOverlap = false;
+            if (renderer.sharedMesh != null)
+            {
+                for (var i = 0; i < renderer.sharedMesh.blendShapeCount; i++)
+                {
+                    var blendshapeName = renderer.sharedMesh.GetBlendShapeName(i);
+                    if (primaryBlendshapes.Contains(blendshapeName))
+                    {
+                        hasBlendshapeOverlap = true;
+                        break;
+                    }
+                }
+            }
+
+            return likelyFaceName || hasBlendshapeOverlap;
         }
 
         private static GameObject CreateRootFromSource(AICompanionStudioConfig config, out Transform characterRoot, out GameObject characterInstance)
@@ -443,7 +520,23 @@ namespace Nyxara.AICompanion.Editor
             lightObject.transform.position = focusPosition + (Quaternion.Euler(eulerAngles) * new Vector3(0f, 0f, -2.5f));
             lightObject.transform.LookAt(focusPosition);
 
-            var light = Undo.AddComponent<Light>(lightObject);
+            var additionalLightData = lightObject.GetComponent<UniversalAdditionalLightData>();
+            if (additionalLightData == null)
+            {
+                additionalLightData = Undo.AddComponent<UniversalAdditionalLightData>(lightObject);
+            }
+
+            var light = lightObject.GetComponent<Light>();
+            if (light == null)
+            {
+                light = Undo.AddComponent<Light>(lightObject);
+            }
+
+            if (light == null)
+            {
+                return;
+            }
+
             light.type = LightType.Spot;
             light.color = color;
             light.intensity = intensity;
@@ -554,6 +647,27 @@ namespace Nyxara.AICompanion.Editor
             }
 
             property.objectReferenceValue = value;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        private static void AssignObjectReferenceList(Object target, string fieldName, IReadOnlyList<SkinnedMeshRenderer> values)
+        {
+            var serializedObject = new SerializedObject(target);
+            var property = serializedObject.FindProperty(fieldName);
+            if (property == null || !property.isArray)
+            {
+                return;
+            }
+
+            property.arraySize = values?.Count ?? 0;
+            if (values != null)
+            {
+                for (var i = 0; i < values.Count; i++)
+                {
+                    property.GetArrayElementAtIndex(i).objectReferenceValue = values[i];
+                }
+            }
+
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
         }
 

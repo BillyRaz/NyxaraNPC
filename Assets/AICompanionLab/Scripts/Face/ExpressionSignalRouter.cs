@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Nyxara.AICompanion.Expressions;
 using UnityEngine;
 
 namespace Nyxara.AICompanion.Face
@@ -28,6 +29,7 @@ namespace Nyxara.AICompanion.Face
 
         [Header("Runtime")]
         [SerializeField] private SkinnedMeshRenderer targetRenderer;
+        [SerializeField] private bool expressionModeActive;
 
         private Dictionary<string, SignalMapping> _signalMap;
         private Dictionary<string, MoodBlendshapeMapping> _moodMap;
@@ -149,17 +151,25 @@ namespace Nyxara.AICompanion.Face
 
         private void SetBlendshapeWeight(string blendshapeName, float weight)
         {
+            if (!expressionModeActive && ExpressionBuilderHelper.IsMouthRelatedBlendshape(blendshapeName))
+            {
+                return;
+            }
+
+            if (_driver != null)
+            {
+                _driver.SetBlendshapeWeight(blendshapeName, weight);
+                return;
+            }
+
             if (targetRenderer != null && targetRenderer.sharedMesh != null)
             {
                 var index = targetRenderer.sharedMesh.GetBlendShapeIndex(blendshapeName);
                 if (index >= 0)
                 {
                     targetRenderer.SetBlendShapeWeight(index, weight);
-                    return;
                 }
             }
-
-            _driver?.SetBlendshapeWeight(blendshapeName, weight);
         }
 
         public void ClearSignal()
@@ -181,6 +191,11 @@ namespace Nyxara.AICompanion.Face
                 weight = weight
             });
             BuildSignalMap();
+        }
+
+        public void SetExpressionMode(bool active)
+        {
+            expressionModeActive = active;
         }
 
 #if UNITY_EDITOR

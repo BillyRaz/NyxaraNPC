@@ -42,6 +42,11 @@ namespace Nyxara.AICompanion.Speech
             set => voiceModelPath = value;
         }
 
+        public void SetLipSyncController(VisemeLipSyncController controller)
+        {
+            lipSyncController = controller;
+        }
+
         public async Task<AudioClip> SpeakAsync(string text)
         {
             if (string.IsNullOrWhiteSpace(text))

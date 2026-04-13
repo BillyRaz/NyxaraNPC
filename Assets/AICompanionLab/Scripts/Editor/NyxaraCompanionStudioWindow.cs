@@ -64,6 +64,14 @@ namespace Nyxara.AICompanion.Editor
         private SkinnedMeshRenderer _expressionRenderer;
         private LipSyncData _lipSyncData;
         private ExpressionPreset _selectedExpressionPreset;
+        private bool _expressionModeEnabled;
+        private string _builderPresetName = "New ARKit Expression";
+        private string _builderDescription = string.Empty;
+        private ExpressionCategory _builderCategory = ExpressionCategory.Emotion;
+        private float _builderTransitionTime = 0.15f;
+        private readonly Dictionary<string, string> _builderBlendshapeMap = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, float> _builderWeights = new(StringComparer.OrdinalIgnoreCase);
+        private readonly List<string> _builderBlendshapeOptions = new();
 
         [MenuItem("Nyxara/AI Companion/Studio")]
         public static void ShowWindow()
@@ -384,14 +392,31 @@ namespace Nyxara.AICompanion.Editor
             var studioRoot = ResolveStudioRootFromContext();
             SyncTabContextFromStudioRoot(studioRoot);
             var expressionLibrary = studioRoot != null ? studioRoot.GetComponent<ExpressionLibraryManager>() : null;
+            var faceDriver = studioRoot != null ? studioRoot.GetComponent<ArkItBlendshapeDriver>() : null;
+            EnsureBuilderState(faceDriver, expressionLibrary);
 
             EditorGUILayout.BeginVertical("box");
             EditorGUILayout.LabelField("Expression Tools", EditorStyles.boldLabel);
             EditorGUILayout.LabelField("Studio Root", studioRoot != null ? studioRoot.name : "Missing");
-            _expressionRenderer = (SkinnedMeshRenderer)EditorGUILayout.ObjectField("Face Renderer", _expressionRenderer, typeof(SkinnedMeshRenderer), true);
+            var newExpressionRenderer = (SkinnedMeshRenderer)EditorGUILayout.ObjectField("Face Renderer", _expressionRenderer, typeof(SkinnedMeshRenderer), true);
+            if (newExpressionRenderer != _expressionRenderer)
+            {
+                _expressionRenderer = newExpressionRenderer;
+                _builderBlendshapeMap.Clear();
+                _builderWeights.Clear();
+                RefreshBuilderBlendshapeOptions();
+                AutoDetectBuilderBlendshapes();
+                PullWeightsFromFaceDriver(faceDriver);
+            }
             EditorGUILayout.LabelField("Library Manager", expressionLibrary != null ? expressionLibrary.name : "Missing in scene");
             EditorGUILayout.LabelField("Loaded Presets", expressionLibrary != null ? expressionLibrary.LoadedPresets.Count.ToString() : "0");
             _selectedExpressionPreset = (ExpressionPreset)EditorGUILayout.ObjectField("Selected Preset", _selectedExpressionPreset, typeof(ExpressionPreset), false);
+            var newExpressionMode = EditorGUILayout.ToggleLeft("Expression Mode (full face control, including mouth)", _expressionModeEnabled);
+            if (newExpressionMode != _expressionModeEnabled)
+            {
+                _expressionModeEnabled = newExpressionMode;
+                ApplyExpressionModeToScene(studioRoot);
+            }
 
             EditorGUILayout.BeginHorizontal();
             GUI.enabled = expressionLibrary != null;
@@ -419,13 +444,26 @@ namespace Nyxara.AICompanion.Editor
             GUI.enabled = true;
             EditorGUILayout.EndHorizontal();
 
-            EditorGUILayout.HelpBox("This tab keeps expression work inside the main studio window. For detailed blendshape sculpting, the dedicated expression editor is still available if you want it.", MessageType.Info);
+            EditorGUILayout.HelpBox(_expressionModeEnabled
+                ? "Expression Mode is ON. The expression tools own the full face, including mouth blendshapes."
+                : "Expression Mode is OFF. Mouth-related blendshapes are reserved for lip sync, while expressions drive the rest of the face.", MessageType.Info);
+            EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Open Detailed Expression Editor"))
             {
                 ExpressionEditorWindow.ShowWindow();
             }
 
+            if (GUILayout.Button("Log Face Blendshape Report"))
+            {
+                LogFaceBlendshapeReport(studioRoot, expressionLibrary);
+            }
+
+            EditorGUILayout.EndHorizontal();
+
             EditorGUILayout.EndVertical();
+
+            EditorGUILayout.Space(8f);
+            DrawArkitExpressionBuilder(expressionLibrary, faceDriver);
         }
 
         private void DrawLipSyncTab()
@@ -447,6 +485,134 @@ namespace Nyxara.AICompanion.Editor
             }
 
             EditorGUILayout.EndVertical();
+        }
+
+        private void DrawArkitExpressionBuilder(ExpressionLibraryManager expressionLibrary, ArkItBlendshapeDriver faceDriver)
+        {
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("ARKit Expression Builder", EditorStyles.boldLabel);
+
+            if (_expressionRenderer == null)
+            {
+                EditorGUILayout.HelpBox("Select or auto-detect a face renderer first so the builder can find ARKit blendshapes.", MessageType.Warning);
+                EditorGUILayout.EndVertical();
+                return;
+            }
+
+            if (_builderBlendshapeOptions.Count == 0)
+            {
+                RefreshBuilderBlendshapeOptions();
+            }
+
+            EditorGUILayout.HelpBox("Use ARKit-style sliders to pose the face, name the expression, then click Build Expression to save it directly into the expression library for runtime and AI use.", MessageType.Info);
+
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Auto-Detect ARKit"))
+            {
+                AutoDetectBuilderBlendshapes();
+                PullWeightsFromFaceDriver(faceDriver);
+                Repaint();
+            }
+
+            if (GUILayout.Button("Pull Current Face"))
+            {
+                PullWeightsFromFaceDriver(faceDriver);
+            }
+
+            if (GUILayout.Button("Reset Builder"))
+            {
+                ResetBuilderWeights();
+                expressionLibrary?.ResetToNeutral();
+            }
+
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(6f);
+            _builderPresetName = EditorGUILayout.TextField("Expression Name", _builderPresetName);
+            _builderCategory = (ExpressionCategory)EditorGUILayout.EnumPopup("Category", _builderCategory);
+            _builderDescription = EditorGUILayout.TextField("Description", _builderDescription);
+            _builderTransitionTime = EditorGUILayout.Slider("Transition Time", _builderTransitionTime, 0.05f, 1f);
+
+            EditorGUILayout.Space(8f);
+            var controls = ExpressionBuilderHelper.GetDefaultControls();
+            for (var i = 0; i < controls.Count; i++)
+            {
+                var control = controls[i];
+                DrawBuilderControlRow(control, expressionLibrary, faceDriver);
+            }
+
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.BeginHorizontal();
+            GUI.enabled = _selectedExpressionPreset != null;
+            if (GUILayout.Button("Load Selected Into Builder"))
+            {
+                LoadPresetIntoBuilder(_selectedExpressionPreset);
+            }
+
+            GUI.enabled = expressionLibrary != null && _selectedExpressionPreset != null;
+            if (GUILayout.Button("Delete Selected Preset"))
+            {
+                if (EditorUtility.DisplayDialog("Delete Expression", $"Delete '{_selectedExpressionPreset.displayName}' from the expression library?", "Delete", "Cancel"))
+                {
+                    if (expressionLibrary.DeletePreset(_selectedExpressionPreset))
+                    {
+                        _selectedExpressionPreset = expressionLibrary.LoadedPresets.FirstOrDefault();
+                    }
+                }
+            }
+
+            GUI.enabled = expressionLibrary != null;
+            if (GUILayout.Button("Build Expression", GUILayout.Height(32f)))
+            {
+                BuildExpressionPreset(expressionLibrary);
+            }
+
+            GUI.enabled = true;
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.EndVertical();
+        }
+
+        private void DrawBuilderControlRow(
+            ExpressionBuilderHelper.ControlDefinition control,
+            ExpressionLibraryManager expressionLibrary,
+            ArkItBlendshapeDriver faceDriver)
+        {
+            if (!_builderWeights.ContainsKey(control.key))
+            {
+                _builderWeights[control.key] = 0f;
+            }
+
+            if (!_builderBlendshapeMap.ContainsKey(control.key))
+            {
+                _builderBlendshapeMap[control.key] = string.Empty;
+            }
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(control.displayName, GUILayout.Width(135f));
+
+            var popupIndex = GetBuilderPopupIndex(_builderBlendshapeMap[control.key]);
+            var newIndex = EditorGUILayout.Popup(popupIndex, _builderBlendshapeOptions.ToArray(), GUILayout.Width(220f));
+            var selectedBlendshape = newIndex > 0 && newIndex < _builderBlendshapeOptions.Count ? _builderBlendshapeOptions[newIndex] : string.Empty;
+            if (!string.Equals(selectedBlendshape, _builderBlendshapeMap[control.key], StringComparison.Ordinal))
+            {
+                _builderBlendshapeMap[control.key] = selectedBlendshape;
+                _builderWeights[control.key] = !string.IsNullOrWhiteSpace(selectedBlendshape) && faceDriver != null
+                    ? faceDriver.GetBlendshapeWeight(selectedBlendshape)
+                    : 0f;
+            }
+
+            using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(_builderBlendshapeMap[control.key])))
+            {
+                var currentValue = _builderWeights[control.key];
+                var newValue = EditorGUILayout.Slider(currentValue, 0f, 100f);
+                if (Math.Abs(newValue - currentValue) > 0.01f)
+                {
+                    _builderWeights[control.key] = newValue;
+                    ApplyBuilderPreview(expressionLibrary, faceDriver);
+                }
+            }
+
+            EditorGUILayout.EndHorizontal();
         }
 
         private void DrawDiagnosticsTab()
@@ -780,6 +946,14 @@ namespace Nyxara.AICompanion.Editor
             _expressionRenderer = null;
             _lipSyncData = null;
             _selectedExpressionPreset = null;
+            _expressionModeEnabled = false;
+            _builderPresetName = "New ARKit Expression";
+            _builderDescription = string.Empty;
+            _builderCategory = ExpressionCategory.Emotion;
+            _builderTransitionTime = 0.15f;
+            _builderBlendshapeMap.Clear();
+            _builderWeights.Clear();
+            _builderBlendshapeOptions.Clear();
             _logEntries.Clear();
         }
 
@@ -898,6 +1072,291 @@ namespace Nyxara.AICompanion.Editor
             return string.Join("/", names);
         }
 
+        private void EnsureBuilderState(ArkItBlendshapeDriver faceDriver, ExpressionLibraryManager expressionLibrary)
+        {
+            if (_expressionRenderer == null && faceDriver != null && faceDriver.TargetRenderer != null)
+            {
+                _expressionRenderer = faceDriver.TargetRenderer;
+            }
+
+            RefreshBuilderBlendshapeOptions();
+            if (_builderBlendshapeMap.Count == 0)
+            {
+                AutoDetectBuilderBlendshapes();
+            }
+
+            if (_builderWeights.Count == 0)
+            {
+                PullWeightsFromFaceDriver(faceDriver);
+            }
+
+            if (_selectedExpressionPreset == null && expressionLibrary != null && expressionLibrary.LoadedPresets.Count > 0)
+            {
+                _selectedExpressionPreset = expressionLibrary.LoadedPresets[0];
+            }
+        }
+
+        private void RefreshBuilderBlendshapeOptions()
+        {
+            _builderBlendshapeOptions.Clear();
+            _builderBlendshapeOptions.Add("<None>");
+            _builderBlendshapeOptions.AddRange(GetAvailableBuilderBlendshapeNames());
+        }
+
+        private void AutoDetectBuilderBlendshapes()
+        {
+            var detected = ExpressionBuilderHelper.AutoDetectBlendshapes(GetAvailableBuilderRenderers());
+            foreach (var control in ExpressionBuilderHelper.GetDefaultControls())
+            {
+                _builderBlendshapeMap[control.key] = detected.TryGetValue(control.key, out var blendshapeName) ? blendshapeName : string.Empty;
+                if (!_builderWeights.ContainsKey(control.key))
+                {
+                    _builderWeights[control.key] = 0f;
+                }
+            }
+        }
+
+        private void PullWeightsFromFaceDriver(ArkItBlendshapeDriver faceDriver)
+        {
+            foreach (var control in ExpressionBuilderHelper.GetDefaultControls())
+            {
+                if (!_builderBlendshapeMap.TryGetValue(control.key, out var blendshapeName) || string.IsNullOrWhiteSpace(blendshapeName))
+                {
+                    _builderWeights[control.key] = 0f;
+                    continue;
+                }
+
+                _builderWeights[control.key] = faceDriver != null ? faceDriver.GetBlendshapeWeight(blendshapeName) : GetRendererBlendshapeWeight(blendshapeName);
+            }
+        }
+
+        private void ResetBuilderWeights()
+        {
+            foreach (var control in ExpressionBuilderHelper.GetDefaultControls())
+            {
+                _builderWeights[control.key] = 0f;
+            }
+        }
+
+        private void LoadPresetIntoBuilder(ExpressionPreset preset)
+        {
+            if (preset == null)
+            {
+                return;
+            }
+
+            _builderPresetName = preset.displayName;
+            _builderDescription = preset.description;
+            _builderCategory = preset.category;
+            _builderTransitionTime = preset.transitionTimeInSeconds;
+
+            if (_builderBlendshapeMap.Count == 0)
+            {
+                AutoDetectBuilderBlendshapes();
+            }
+
+            var loadedWeights = ExpressionBuilderHelper.LoadControlWeightsFromPreset(preset, _builderBlendshapeMap);
+            foreach (var pair in loadedWeights)
+            {
+                _builderWeights[pair.Key] = pair.Value;
+            }
+        }
+
+        private void BuildExpressionPreset(ExpressionLibraryManager expressionLibrary)
+        {
+            if (expressionLibrary == null)
+            {
+                EditorUtility.DisplayDialog("Expression Library Missing", "Add or build an ExpressionLibraryManager on the studio root first.", "OK");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(_builderPresetName))
+            {
+                EditorUtility.DisplayDialog("Name Required", "Enter a name for the new expression before building it.", "OK");
+                return;
+            }
+
+            var blendshapeWeights = ExpressionBuilderHelper.BuildBlendshapeWeights(
+                _builderBlendshapeMap,
+                _builderWeights,
+                GetAvailableBuilderBlendshapeNames());
+            if (blendshapeWeights.Count == 0)
+            {
+                EditorUtility.DisplayDialog("No ARKit Weights", "Move at least one ARKit slider before building the expression.", "OK");
+                return;
+            }
+
+            var preset = expressionLibrary.SavePreset(
+                _builderPresetName,
+                _builderCategory,
+                _builderDescription,
+                _builderTransitionTime,
+                blendshapeWeights);
+
+            if (preset != null)
+            {
+                _selectedExpressionPreset = preset;
+                expressionLibrary.ApplyPreset(preset);
+                EditorGUIUtility.PingObject(preset);
+            }
+        }
+
+        private void ApplyBuilderPreview(ExpressionLibraryManager expressionLibrary, ArkItBlendshapeDriver faceDriver)
+        {
+            var blendshapeWeights = ExpressionBuilderHelper.BuildBlendshapeWeights(
+                _builderBlendshapeMap,
+                _builderWeights,
+                GetAvailableBuilderBlendshapeNames());
+
+            if (expressionLibrary != null)
+            {
+                expressionLibrary.ApplyExpressionWeights(blendshapeWeights);
+                return;
+            }
+
+            if (faceDriver == null)
+            {
+                return;
+            }
+
+            foreach (var pair in blendshapeWeights)
+            {
+                faceDriver.TrySetBlendshapeWeight(pair.Key, pair.Value);
+            }
+        }
+
+        private int GetBuilderPopupIndex(string selectedBlendshape)
+        {
+            if (string.IsNullOrWhiteSpace(selectedBlendshape))
+            {
+                return 0;
+            }
+
+            var index = _builderBlendshapeOptions.FindIndex(option => string.Equals(option, selectedBlendshape, StringComparison.Ordinal));
+            return index >= 0 ? index : 0;
+        }
+
+        private float GetRendererBlendshapeWeight(string blendshapeName)
+        {
+            if (string.IsNullOrWhiteSpace(blendshapeName))
+            {
+                return 0f;
+            }
+
+            var maxWeight = 0f;
+            foreach (var renderer in GetAvailableBuilderRenderers())
+            {
+                if (renderer == null || renderer.sharedMesh == null)
+                {
+                    continue;
+                }
+
+                var index = renderer.sharedMesh.GetBlendShapeIndex(blendshapeName);
+                if (index >= 0)
+                {
+                    maxWeight = Mathf.Max(maxWeight, renderer.GetBlendShapeWeight(index));
+                }
+            }
+
+            return maxWeight;
+        }
+
+        private List<SkinnedMeshRenderer> GetAvailableBuilderRenderers()
+        {
+            var studioRoot = ResolveStudioRootFromContext();
+            var renderers = new List<SkinnedMeshRenderer>();
+            var expressionLibrary = studioRoot != null ? studioRoot.GetComponent<ExpressionLibraryManager>() : null;
+            if (expressionLibrary?.TargetFaceRenderers != null)
+            {
+                foreach (var renderer in expressionLibrary.TargetFaceRenderers)
+                {
+                    if (renderer != null && !renderers.Contains(renderer))
+                    {
+                        renderers.Add(renderer);
+                    }
+                }
+            }
+
+            if (renderers.Count == 0 && _expressionRenderer != null)
+            {
+                renderers.Add(_expressionRenderer);
+            }
+
+            return renderers;
+        }
+
+        private List<string> GetAvailableBuilderBlendshapeNames()
+        {
+            return ExpressionBuilderHelper.GetBlendshapeNames(GetAvailableBuilderRenderers());
+        }
+
+        private void LogFaceBlendshapeReport(GameObject studioRoot, ExpressionLibraryManager expressionLibrary)
+        {
+            var renderers = new List<SkinnedMeshRenderer>();
+            if (expressionLibrary?.TargetFaceRenderers != null)
+            {
+                renderers.AddRange(expressionLibrary.TargetFaceRenderers.Where(renderer => renderer != null));
+            }
+
+            if (renderers.Count == 0 && studioRoot != null)
+            {
+                renderers.AddRange(studioRoot.GetComponentsInChildren<SkinnedMeshRenderer>(true));
+            }
+
+            if (renderers.Count == 0)
+            {
+                Debug.LogWarning("[Nyxara Face Report] No SkinnedMeshRenderer found for expression diagnostics.");
+                return;
+            }
+
+            Debug.Log($"[Nyxara Face Report] Renderers={renderers.Count}");
+            foreach (var renderer in renderers.Distinct())
+            {
+                if (renderer == null || renderer.sharedMesh == null)
+                {
+                    continue;
+                }
+
+                var blendshapeNames = new List<string>();
+                for (var i = 0; i < renderer.sharedMesh.blendShapeCount; i++)
+                {
+                    var name = renderer.sharedMesh.GetBlendShapeName(i);
+                    if (NyxaraCompanionStudioWindow.ContainsFaceDebugKeyword(name))
+                    {
+                        blendshapeNames.Add(name);
+                    }
+                }
+
+                var summary = blendshapeNames.Count > 0 ? string.Join(", ", blendshapeNames) : "No mouth/jaw-related blendshapes detected";
+                Debug.Log($"[Nyxara Face Report] Renderer='{renderer.name}' Mesh='{renderer.sharedMesh.name}' Blendshapes: {summary}", renderer);
+            }
+        }
+
+        private static bool ContainsFaceDebugKeyword(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            var normalized = value.ToLowerInvariant();
+            return normalized.Contains("mouth") ||
+                   normalized.Contains("jaw") ||
+                   normalized.Contains("lip") ||
+                   normalized.Contains("smile") ||
+                   normalized.Contains("frown") ||
+                   normalized.Contains("open") ||
+                   normalized.Contains("close") ||
+                   normalized.Contains("funnel") ||
+                   normalized.Contains("pucker") ||
+                   normalized.Contains("viseme") ||
+                   normalized.Contains("aa") ||
+                   normalized.Contains("oh") ||
+                   normalized.Contains("ou") ||
+                   normalized.Contains("ee") ||
+                   normalized.Contains("ih");
+        }
+
         private GameObject ResolveStudioRootFromContext()
         {
             var selected = Selection.activeGameObject;
@@ -939,6 +1398,8 @@ namespace Nyxara.AICompanion.Editor
                 {
                     _selectedExpressionPreset = expressionLibrary.LoadedPresets[0];
                 }
+
+                _expressionModeEnabled = expressionLibrary.ExpressionModeActive;
             }
 
             var lipSyncController = studioRoot.GetComponent<VisemeLipSyncController>();
@@ -956,6 +1417,26 @@ namespace Nyxara.AICompanion.Editor
                     _lipSyncData = lipSyncData;
                 }
             }
+        }
+
+        private void ApplyExpressionModeToScene(GameObject studioRoot)
+        {
+            if (studioRoot == null)
+            {
+                return;
+            }
+
+            var faceDriver = studioRoot.GetComponent<ArkItBlendshapeDriver>();
+            faceDriver?.SetExpressionMode(_expressionModeEnabled);
+
+            var expressionLibrary = studioRoot.GetComponent<ExpressionLibraryManager>();
+            expressionLibrary?.SetExpressionMode(_expressionModeEnabled);
+
+            var signalRouter = studioRoot.GetComponent<ExpressionSignalRouter>();
+            signalRouter?.SetExpressionMode(_expressionModeEnabled);
+
+            var lipSyncController = studioRoot.GetComponent<VisemeLipSyncController>();
+            lipSyncController?.SetExpressionMode(_expressionModeEnabled);
         }
 
         private static T GetObjectReference<T>(UnityEngine.Object source, string propertyName) where T : UnityEngine.Object
@@ -1046,6 +1527,8 @@ namespace Nyxara.AICompanion.Editor
                     }
                 }
 
+                AppendFaceRendererDiagnostics(report, expressionLibrary, faceDriver);
+
                 var prefabPath = $"{_config.prefabFolder}/{_config.characterName}_StudioRoot.prefab";
                 if (!AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath))
                 {
@@ -1065,6 +1548,228 @@ namespace Nyxara.AICompanion.Editor
                 stopwatch.Stop();
                 report.durationMs = stopwatch.ElapsedMilliseconds;
                 return report;
+            }
+
+            private static void AppendFaceRendererDiagnostics(SystemDiagnosticsReport report, ExpressionLibraryManager expressionLibrary, ArkItBlendshapeDriver faceDriver)
+            {
+                var renderers = new List<SkinnedMeshRenderer>();
+                if (expressionLibrary?.TargetFaceRenderers != null)
+                {
+                    renderers.AddRange(expressionLibrary.TargetFaceRenderers.Where(renderer => renderer != null));
+                }
+
+                if (renderers.Count == 0 && faceDriver?.TargetRenderers != null)
+                {
+                    renderers.AddRange(faceDriver.TargetRenderers.Where(renderer => renderer != null));
+                }
+
+                if (renderers.Count == 0)
+                {
+                    return;
+                }
+
+                var distinctRenderers = renderers.Distinct().ToList();
+                report.configIssues.Add(new ConfigIssue
+                {
+                    severity = IssueSeverity.Info,
+                    component = "Face",
+                    issue = $"Detected {distinctRenderers.Count} face renderer(s): {string.Join(", ", distinctRenderers.Select(renderer => renderer.name))}",
+                    suggestion = "This should include head, lashes, eyes, and mouth meshes when they are separate"
+                });
+
+                foreach (var renderer in distinctRenderers)
+                {
+                    if (renderer == null || renderer.sharedMesh == null)
+                    {
+                        continue;
+                    }
+
+                    var mouthShapes = GetMouthRelatedBlendshapeNames(renderer);
+                    var eyeShapes = GetEyeRelatedBlendshapeNames(renderer);
+                    var jawShapes = GetJawRelatedBlendshapeNames(renderer);
+                    var tongueTeethShapes = GetTongueOrTeethBlendshapeNames(renderer);
+                    var hasRecognizedShapes = mouthShapes.Any(name => LooksLikeRecognizedMouthShape(name));
+                    var isMouthRenderer = renderer.name.IndexOf("mouth", StringComparison.OrdinalIgnoreCase) >= 0;
+                    var isEyeRenderer = renderer.name.IndexOf("eye", StringComparison.OrdinalIgnoreCase) >= 0;
+
+                    if (isMouthRenderer)
+                    {
+                        report.configIssues.Add(new ConfigIssue
+                        {
+                            severity = IssueSeverity.Info,
+                            component = "Face",
+                            issue = $"Renderer '{renderer.name}' mouth-related blendshapes: {(mouthShapes.Count > 0 ? string.Join(", ", mouthShapes) : "none")}",
+                            suggestion = "If these names do not resemble jaw/mouth/viseme shapes, the inner mouth mesh will need custom mapping or re-rigging"
+                        });
+
+                        report.configIssues.Add(new ConfigIssue
+                        {
+                            severity = IssueSeverity.Info,
+                            component = "Face",
+                            issue = $"Renderer '{renderer.name}' jaw blendshapes: {(jawShapes.Count > 0 ? string.Join(", ", jawShapes) : "none")}",
+                            suggestion = "Jaw shapes should exist if speech or open-mouth expressions need to move the inner mouth"
+                        });
+
+                        report.configIssues.Add(new ConfigIssue
+                        {
+                            severity = IssueSeverity.Info,
+                            component = "Face",
+                            issue = $"Renderer '{renderer.name}' tongue/teeth blendshapes: {(tongueTeethShapes.Count > 0 ? string.Join(", ", tongueTeethShapes) : "none")}",
+                            suggestion = "Tongue or teeth shapes are optional, but useful to diagnose inner-mouth motion"
+                        });
+
+                        var hasTeethShape = tongueTeethShapes.Any(name =>
+                            name.IndexOf("teeth", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            name.IndexOf("tooth", StringComparison.OrdinalIgnoreCase) >= 0);
+                        if (!hasTeethShape)
+                        {
+                            report.configIssues.Add(new ConfigIssue
+                            {
+                                severity = IssueSeverity.Warning,
+                                component = "Face",
+                                issue = $"Renderer '{renderer.name}' has no teeth-specific blendshapes",
+                                suggestion = "Upper/lower teeth opening usually needs teeth blendshapes or proper jaw bone rigging; jawOpen alone will not create that separation"
+                            });
+                        }
+                    }
+
+                    if (isEyeRenderer)
+                    {
+                        report.configIssues.Add(new ConfigIssue
+                        {
+                            severity = IssueSeverity.Info,
+                            component = "Face",
+                            issue = $"Renderer '{renderer.name}' eye-related blendshapes: {(eyeShapes.Count > 0 ? string.Join(", ", eyeShapes) : "none")}",
+                            suggestion = "Eye renderers should expose blink, look, squint, or brow-linked shapes when separated"
+                        });
+                    }
+
+                    if (isMouthRenderer && mouthShapes.Count == 0)
+                    {
+                        report.configIssues.Add(new ConfigIssue
+                        {
+                            severity = IssueSeverity.Warning,
+                            component = "Face",
+                            issue = $"Renderer '{renderer.name}' exists but has no mouth/jaw-related blendshapes",
+                            suggestion = "This usually means the inner mouth mesh cannot respond to the current facial expression system"
+                        });
+                        continue;
+                    }
+
+                    if (isMouthRenderer && !hasRecognizedShapes)
+                    {
+                        report.configIssues.Add(new ConfigIssue
+                        {
+                            severity = IssueSeverity.Warning,
+                            component = "Face",
+                            issue = $"Renderer '{renderer.name}' has mouth blendshapes, but their names do not match the current ARKit/lip-sync expectations",
+                            suggestion = $"Detected names: {string.Join(", ", mouthShapes)}"
+                        });
+                    }
+                }
+            }
+
+            private static List<string> GetMouthRelatedBlendshapeNames(SkinnedMeshRenderer renderer)
+            {
+                var names = new List<string>();
+                if (renderer == null || renderer.sharedMesh == null)
+                {
+                    return names;
+                }
+
+                for (var i = 0; i < renderer.sharedMesh.blendShapeCount; i++)
+                {
+                    var name = renderer.sharedMesh.GetBlendShapeName(i);
+                    if (ContainsFaceDebugKeyword(name))
+                    {
+                        names.Add(name);
+                    }
+                }
+
+                return names;
+            }
+
+            private static List<string> GetEyeRelatedBlendshapeNames(SkinnedMeshRenderer renderer)
+            {
+                var names = new List<string>();
+                if (renderer == null || renderer.sharedMesh == null)
+                {
+                    return names;
+                }
+
+                for (var i = 0; i < renderer.sharedMesh.blendShapeCount; i++)
+                {
+                    var name = renderer.sharedMesh.GetBlendShapeName(i);
+                    if (ExpressionBuilderHelper.IsEyeRelatedBlendshape(name))
+                    {
+                        names.Add(name);
+                    }
+                }
+
+                return names;
+            }
+
+            private static List<string> GetJawRelatedBlendshapeNames(SkinnedMeshRenderer renderer)
+            {
+                var names = new List<string>();
+                if (renderer == null || renderer.sharedMesh == null)
+                {
+                    return names;
+                }
+
+                for (var i = 0; i < renderer.sharedMesh.blendShapeCount; i++)
+                {
+                    var name = renderer.sharedMesh.GetBlendShapeName(i);
+                    if (ExpressionBuilderHelper.IsJawRelatedBlendshape(name))
+                    {
+                        names.Add(name);
+                    }
+                }
+
+                return names;
+            }
+
+            private static List<string> GetTongueOrTeethBlendshapeNames(SkinnedMeshRenderer renderer)
+            {
+                var names = new List<string>();
+                if (renderer == null || renderer.sharedMesh == null)
+                {
+                    return names;
+                }
+
+                for (var i = 0; i < renderer.sharedMesh.blendShapeCount; i++)
+                {
+                    var name = renderer.sharedMesh.GetBlendShapeName(i);
+                    if (ExpressionBuilderHelper.IsTongueOrTeethRelatedBlendshape(name))
+                    {
+                        names.Add(name);
+                    }
+                }
+
+                return names;
+            }
+
+            private static bool LooksLikeRecognizedMouthShape(string value)
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    return false;
+                }
+
+                var normalized = value.ToLowerInvariant();
+                return normalized.Contains("mouthsmile") ||
+                       normalized.Contains("mouthfrown") ||
+                       normalized.Contains("mouthclose") ||
+                       normalized.Contains("mouthfunnel") ||
+                       normalized.Contains("mouthpucker") ||
+                       normalized.Contains("jawopen") ||
+                       normalized.Contains("mouthopen") ||
+                       normalized.Contains("viseme") ||
+                       normalized.Contains("aa") ||
+                       normalized.Contains("oh") ||
+                       normalized.Contains("ou") ||
+                       normalized.Contains("ee") ||
+                       normalized.Contains("ih");
             }
 
             private static ComponentStatus CheckStatus(string name, bool present, bool operational, string message)

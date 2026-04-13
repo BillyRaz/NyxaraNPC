@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine;
 
@@ -8,6 +9,7 @@ namespace Nyxara.AICompanion.LipSync
     public class VisemeLipSyncController : MonoBehaviour
     {
         [SerializeField] private SkinnedMeshRenderer faceRenderer;
+        [SerializeField] private List<SkinnedMeshRenderer> additionalFaceRenderers = new();
         [SerializeField] private LipSyncData lipSyncData;
         [SerializeField] private PiperTTSPhonemeExtractor phonemeExtractor;
         [SerializeField] private AudioSource audioSource;
@@ -15,9 +17,12 @@ namespace Nyxara.AICompanion.LipSync
         [Header("Runtime Settings")]
         [SerializeField] private bool enableLipSync = true;
         [SerializeField] private float mouthOpenAmount = 0.7f;
+        [SerializeField] private bool expressionModeActive;
+        [SerializeField] private float lowerLipDropAmount = 0.35f;
+        [SerializeField] private float upperLipRaiseAmount = 0.18f;
+        [SerializeField] private float mouthStretchAmount = 0.12f;
 
         private Coroutine _lipSyncCoroutine;
-        private readonly Dictionary<string, int> _blendshapeIndexCache = new();
 
         public bool IsSpeaking { get; private set; }
 
@@ -28,26 +33,21 @@ namespace Nyxara.AICompanion.LipSync
 
         private void CacheBlendshapeIndices()
         {
-            if (faceRenderer == null || faceRenderer.sharedMesh == null || lipSyncData == null)
+            if (GetAllRenderers().Count == 0 || lipSyncData == null)
             {
                 return;
-            }
-
-            _blendshapeIndexCache.Clear();
-            var mesh = faceRenderer.sharedMesh;
-            foreach (var mapping in lipSyncData.visemeMappings)
-            {
-                var index = mesh.GetBlendShapeIndex(mapping.blendshapeName);
-                if (index >= 0)
-                {
-                    _blendshapeIndexCache[mapping.blendshapeName] = index;
-                }
             }
         }
 
         public async Task SpeakWithLipSync(string text)
         {
-            if (!enableLipSync || faceRenderer == null || lipSyncData == null || phonemeExtractor == null)
+            if (expressionModeActive)
+            {
+                StopLipSync();
+                return;
+            }
+
+            if (!enableLipSync || GetAllRenderers().Count == 0 || lipSyncData == null || phonemeExtractor == null)
             {
                 if (_lipSyncCoroutine != null)
                 {
@@ -89,23 +89,20 @@ namespace Nyxara.AICompanion.LipSync
 
         private void ApplyViseme(Viseme viseme)
         {
-            if (faceRenderer == null || lipSyncData == null)
+            if (GetAllRenderers().Count == 0 || lipSyncData == null)
             {
                 return;
             }
 
             foreach (var mapping in lipSyncData.visemeMappings)
             {
-                if (_blendshapeIndexCache.TryGetValue(mapping.blendshapeName, out var index))
-                {
-                    faceRenderer.SetBlendShapeWeight(index, 0f);
-                }
+                SetBlendshapeWeight(mapping.blendshapeName, 0f);
             }
 
             var mappingForViseme = lipSyncData.visemeMappings.Find(m => m.viseme == viseme);
-            if (mappingForViseme != null && _blendshapeIndexCache.TryGetValue(mappingForViseme.blendshapeName, out var targetIndex))
+            if (mappingForViseme != null)
             {
-                faceRenderer.SetBlendShapeWeight(targetIndex, mappingForViseme.intensity);
+                SetBlendshapeWeight(mappingForViseme.blendshapeName, mappingForViseme.intensity);
             }
 
             ApplyJawOpen(viseme == Viseme.sil ? 0f : mouthOpenAmount);
@@ -113,26 +110,36 @@ namespace Nyxara.AICompanion.LipSync
 
         private void ApplySmoothBlend(Viseme viseme, float t)
         {
-            if (faceRenderer == null || lipSyncData == null)
+            if (GetAllRenderers().Count == 0 || lipSyncData == null)
             {
                 return;
             }
 
             var mapping = lipSyncData.visemeMappings.Find(m => m.viseme == viseme);
-            if (mapping != null && _blendshapeIndexCache.TryGetValue(mapping.blendshapeName, out var index))
+            if (mapping != null)
             {
                 var smoothedWeight = Mathf.SmoothStep(0f, mapping.intensity, Mathf.Sin(Mathf.Clamp01(t) * Mathf.PI));
-                faceRenderer.SetBlendShapeWeight(index, smoothedWeight);
+                SetBlendshapeWeight(mapping.blendshapeName, smoothedWeight);
             }
         }
 
         private void ApplyJawOpen(float amount)
         {
-            var jawIndex = faceRenderer?.sharedMesh?.GetBlendShapeIndex("jawOpen") ?? -1;
-            if (jawIndex >= 0 && lipSyncData != null)
+            if (lipSyncData == null)
             {
-                faceRenderer.SetBlendShapeWeight(jawIndex, amount * lipSyncData.jawOpenMultiplier * 100f);
+                return;
             }
+
+            var jawWeight = amount * lipSyncData.jawOpenMultiplier * 100f;
+            SetBlendshapeWeight("jawOpen", jawWeight);
+
+            // These helpers expose the teeth/opening more naturally during speech.
+            SetBlendshapeWeight("mouthLowerDownLeft", jawWeight * lowerLipDropAmount);
+            SetBlendshapeWeight("mouthLowerDownRight", jawWeight * lowerLipDropAmount);
+            SetBlendshapeWeight("mouthUpperUpLeft", jawWeight * upperLipRaiseAmount);
+            SetBlendshapeWeight("mouthUpperUpRight", jawWeight * upperLipRaiseAmount);
+            SetBlendshapeWeight("mouthStretchLeft", jawWeight * mouthStretchAmount);
+            SetBlendshapeWeight("mouthStretchRight", jawWeight * mouthStretchAmount);
         }
 
         private IEnumerator SimpleJawMovement()
@@ -164,9 +171,59 @@ namespace Nyxara.AICompanion.LipSync
             IsSpeaking = false;
         }
 
+        public void SetExpressionMode(bool active)
+        {
+            expressionModeActive = active;
+            if (expressionModeActive)
+            {
+                StopLipSync();
+            }
+        }
+
         private void OnDestroy()
         {
             StopLipSync();
+        }
+
+        private void SetBlendshapeWeight(string blendshapeName, float weight)
+        {
+            if (string.IsNullOrWhiteSpace(blendshapeName))
+            {
+                return;
+            }
+
+            foreach (var renderer in GetAllRenderers())
+            {
+                if (renderer == null || renderer.sharedMesh == null)
+                {
+                    continue;
+                }
+
+                var index = renderer.sharedMesh.GetBlendShapeIndex(blendshapeName);
+                if (index >= 0)
+                {
+                    renderer.SetBlendShapeWeight(index, weight);
+                }
+            }
+        }
+
+        private List<SkinnedMeshRenderer> GetAllRenderers()
+        {
+            var renderers = new List<SkinnedMeshRenderer>();
+            if (faceRenderer != null)
+            {
+                renderers.Add(faceRenderer);
+            }
+
+            foreach (var renderer in additionalFaceRenderers)
+            {
+                if (renderer != null && !renderers.Contains(renderer))
+                {
+                    renderers.Add(renderer);
+                }
+            }
+
+            return renderers;
         }
     }
 }

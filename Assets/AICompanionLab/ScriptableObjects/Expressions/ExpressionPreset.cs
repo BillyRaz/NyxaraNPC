@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace Nyxara.AICompanion.Expressions
@@ -43,6 +44,19 @@ namespace Nyxara.AICompanion.Expressions
             }
         }
 
+        public void ApplyToSkinnedMeshRenderers(IEnumerable<SkinnedMeshRenderer> renderers)
+        {
+            if (renderers == null)
+            {
+                return;
+            }
+
+            foreach (var renderer in renderers.Where(r => r != null))
+            {
+                ApplyToSkinnedMeshRenderer(renderer);
+            }
+        }
+
         public void ResetToNeutral(SkinnedMeshRenderer renderer, List<string> allBlendshapes)
         {
             if (renderer == null || renderer.sharedMesh == null)
@@ -57,6 +71,19 @@ namespace Nyxara.AICompanion.Expressions
                 {
                     renderer.SetBlendShapeWeight(index, 0f);
                 }
+            }
+        }
+
+        public void ResetToNeutral(IEnumerable<SkinnedMeshRenderer> renderers, List<string> allBlendshapes)
+        {
+            if (renderers == null || allBlendshapes == null)
+            {
+                return;
+            }
+
+            foreach (var renderer in renderers.Where(r => r != null))
+            {
+                ResetToNeutral(renderer, allBlendshapes);
             }
         }
 
