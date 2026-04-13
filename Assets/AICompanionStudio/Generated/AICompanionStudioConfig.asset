@@ -34,6 +34,15 @@ MonoBehaviour:
   showRuntimeConversationOverlay: 1
   runtimeMicHoldKey: 118
   runtimePromptPopupKey: 116
+  llmContextSize: 2048
+  llmNumThreads: -1
+  llmNumPredict: 48
+  llmCachePrompt: 1
+  llmTemperature: 0.2
+  llmTopP: 0.85
+  llmTopK: 30
+  llmMinP: 0.08
+  llmRepeatPenalty: 1.05
   characterLocalPosition: {x: 0, y: 0, z: 0}
   characterLocalEuler: {x: 0, y: 0, z: 0}
   focusHeightOffset: 1.55

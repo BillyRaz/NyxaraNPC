@@ -6,7 +6,7 @@ namespace Nyxara.AICompanion.Runtime
 {
     public class RecentMemoryController : MonoBehaviour
     {
-        [SerializeField] private int maxMemoryEntries = 5;
+        [SerializeField] private int maxMemoryEntries = 3;
 
         private readonly Queue<MemoryEntry> _memories = new();
 

@@ -235,6 +235,10 @@ It would be useful to eventually condense the face section into grouped health s
 - Add layered facial blending rules instead of simple ownership handoff.
 - Add configurable priority between lip sync, mood, and expression presets.
 - Add optional jaw-only runtime debug overlays or sliders.
+- Add an optional server-backed AI stack alongside the current local-first setup.
+- Add a dedicated server configuration workflow for credentials, endpoints, IP/host, API keys, and remote model IDs.
+- Expand the Status tab so local LLM/STT/TTS model paths can be swapped directly there without leaving the main studio workflow.
+- Support hybrid setups where local and remote services can be mixed per subsystem, such as local TTS with remote LLM.
 
 ## Files Most Central To The System
 

@@ -5,36 +5,25 @@ namespace Nyxara.AICompanion.Prompting
 {
     public class PromptBuilder
     {
-        private const string PromptTemplate = @"You are {name}.
+        private const string PromptTemplate = @"You are {name}, a {role}.
+Traits: {personality}
+Style: {speech_style}
+Background: {background}
+State: mood={mood}, trust={trust}, relationship={relationship}, task={current_task}, danger={danger}
+Player: {player_text}
 
-Identity:
-- Role: {role}
-- Personality: {personality}
-- Speech style: {speech_style}
-- Background summary: {background}
-
-Current State:
-- Mood: {mood}
-- Trust: {trust}
-- Relationship: {relationship}
-- Current task: {current_task}
-- Danger level: {danger}
-
-Player said:
-{player_text}
-
-Return exactly in this format:
+Reply exactly as:
 Intent: <intent>
 Mood: <mood>
 Action: <action>
 Signal: <signal>
-Dialogue: <spoken dialogue only>
+Dialogue: <short spoken dialogue>
 
 Rules:
-- spoken dialogue only in Dialogue field
-- no narration, no stage directions, no roleplay formatting
-- no asterisks, no square brackets, no parentheses
-- keep response short and natural";
+- Dialogue must be short, natural, and under 2 sentences
+- no narration
+- no stage directions
+- no brackets or asterisks";
 
         public string BuildPrompt(CharacterProfileData profile, NPCRuntimeState state, string playerText, string recentMemory = "")
         {
@@ -58,7 +47,7 @@ Rules:
             if (!string.IsNullOrWhiteSpace(recentMemory))
             {
                 prompt.AppendLine();
-                prompt.AppendLine("Recent Memory:");
+                prompt.AppendLine("Memory:");
                 prompt.AppendLine(recentMemory);
             }
 

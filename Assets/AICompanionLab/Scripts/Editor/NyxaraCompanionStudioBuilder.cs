@@ -79,8 +79,8 @@ namespace Nyxara.AICompanion.Editor
             var llmObject = GetOrCreateChild(systemsRoot.transform, "Local LLM");
             var llm = GetOrAddComponent<LLM>(llmObject);
             llm.model = ResolveModelPathForLlm(config);
-            llm.contextSize = 8192;
-            llm.numThreads = -1;
+            llm.contextSize = config.llmContextSize;
+            llm.numThreads = config.llmNumThreads;
             llm.numGPULayers = 0;
 
             var sttObject = GetOrCreateChild(systemsRoot.transform, "Speech To Text");
@@ -97,6 +97,14 @@ namespace Nyxara.AICompanion.Editor
 
             var agent = GetOrAddComponent<LLMAgent>(root);
             agent.llm = llm;
+            agent.systemPrompt = "You are Nyxara, a concise, expressive companion. Respond briefly, naturally, and follow the requested output format exactly.";
+            agent.temperature = config.llmTemperature;
+            agent.topP = config.llmTopP;
+            agent.topK = config.llmTopK;
+            agent.minP = config.llmMinP;
+            agent.repeatPenalty = config.llmRepeatPenalty;
+            agent.numPredict = config.llmNumPredict;
+            agent.cachePrompt = config.llmCachePrompt;
 
             var brain = GetOrAddComponent<NyxaraCompanionBrain>(root);
             var faceDriver = GetOrAddComponent<ArkItBlendshapeDriver>(root);
@@ -154,6 +162,7 @@ namespace Nyxara.AICompanion.Editor
                 ? characterRoot?.gameObject
                 : (characterRoot != null && characterRoot.childCount > 0 ? characterRoot.GetChild(0).gameObject : null);
             ConfigureRootSystems(config, root, characterInstance, config.characterProfile);
+            EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
 
             var prefabPath = $"{config.companionPrefabFolder}/{config.characterName}_CompanionRoot.prefab";
             var prefab = PrefabUtility.SaveAsPrefabAssetAndConnect(root, prefabPath, InteractionMode.UserAction);
@@ -194,6 +203,7 @@ namespace Nyxara.AICompanion.Editor
             }
 
             ConfigureRootSystems(config, root, characterInstance != null ? characterInstance.gameObject : null, config.characterProfile);
+            EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
         }
 
         public static void ResetStudio(AICompanionStudioConfig config)
@@ -349,6 +359,7 @@ namespace Nyxara.AICompanion.Editor
 
             var tts = root.GetComponentInChildren<PiperTtsService>(true);
             var audioSource = tts != null ? GetObjectReference<AudioSource>(tts, "audioSource") : root.GetComponentInChildren<AudioSource>(true);
+            var llm = root.GetComponentInChildren<LLM>(true);
             var faceDriver = root.GetComponent<ArkItBlendshapeDriver>();
             var signalRouter = root.GetComponent<ExpressionSignalRouter>();
             var expressionLibrary = root.GetComponent<ExpressionLibraryManager>();
@@ -363,6 +374,26 @@ namespace Nyxara.AICompanion.Editor
             var whisperInput = root.GetComponentInChildren<WhisperMicrophoneInput>(true);
             var whisperManager = root.GetComponentInChildren<WhisperManager>(true);
             var lipSyncData = EnsureLipSyncData(config);
+
+            if (llm != null)
+            {
+                AssignIntField(llm, "_contextSize", config.llmContextSize);
+                AssignIntField(llm, "_numThreads", config.llmNumThreads);
+                AssignIntField(llm, "_numGPULayers", 0);
+            }
+
+            if (agent != null)
+            {
+                AssignObjectReference(agent, "_llm", llm);
+                AssignFloatField(agent, "temperature", config.llmTemperature);
+                AssignFloatField(agent, "topP", config.llmTopP);
+                AssignIntField(agent, "topK", config.llmTopK);
+                AssignFloatField(agent, "minP", config.llmMinP);
+                AssignFloatField(agent, "repeatPenalty", config.llmRepeatPenalty);
+                AssignIntField(agent, "numPredict", config.llmNumPredict);
+                AssignBoolField(agent, "cachePrompt", config.llmCachePrompt);
+                AssignStringField(agent, "_systemPrompt", "You are Nyxara, a concise, expressive companion. Respond briefly, naturally, and follow the requested output format exactly.");
+            }
 
             if (faceDriver != null)
             {
@@ -418,6 +449,11 @@ namespace Nyxara.AICompanion.Editor
                 AssignObjectReference(actionGatekeeper, "actionExecutor", actionExecutor);
             }
 
+            if (memoryController != null)
+            {
+                AssignIntField(memoryController, "maxMemoryEntries", 3);
+            }
+
             if (actionExecutor != null)
             {
                 AssignObjectReference(actionExecutor, "companionTransform", root.transform);
@@ -462,6 +498,9 @@ namespace Nyxara.AICompanion.Editor
             {
                 EnsureSingleAudioListener(studioListener);
             }
+
+            EditorUtility.SetDirty(root);
+            PersistPrefabOverrides(root, llm, agent);
         }
 
         private static LipSyncData EnsureLipSyncData(AICompanionStudioConfig config)
@@ -918,6 +957,19 @@ namespace Nyxara.AICompanion.Editor
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
         }
 
+        private static void AssignIntField(UnityEngine.Object target, string fieldName, int value)
+        {
+            var serializedObject = new SerializedObject(target);
+            var property = serializedObject.FindProperty(fieldName);
+            if (property == null)
+            {
+                return;
+            }
+
+            property.intValue = value;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+        }
+
         private static void AssignBoolField(UnityEngine.Object target, string fieldName, bool value)
         {
             var serializedObject = new SerializedObject(target);
@@ -929,6 +981,33 @@ namespace Nyxara.AICompanion.Editor
 
             property.boolValue = value;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        private static void PersistPrefabOverrides(GameObject root, params UnityEngine.Object[] objectsToApply)
+        {
+            if (root == null)
+            {
+                return;
+            }
+
+            var prefabPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(root);
+            if (string.IsNullOrWhiteSpace(prefabPath))
+            {
+                return;
+            }
+
+            foreach (var target in objectsToApply)
+            {
+                if (target == null || !PrefabUtility.IsPartOfPrefabInstance(target))
+                {
+                    continue;
+                }
+
+                PrefabUtility.RecordPrefabInstancePropertyModifications(target);
+                PrefabUtility.ApplyObjectOverride(target, prefabPath, InteractionMode.AutomatedAction);
+            }
+
+            AssetDatabase.SaveAssets();
         }
 
         private static void AssignEnumField(UnityEngine.Object target, string fieldName, Enum value)

@@ -298,7 +298,7 @@ MonoBehaviour:
   _numThreads: -1
   _numGPULayers: 0
   _parallelPrompts: 1
-  _contextSize: 8192
+  _contextSize: 2048
   _batchSize: 512
   _model: Models/Qwen2.5-7B-Instruct-1M-Q4_K_M.gguf
   _flashAttention: 0
@@ -566,14 +566,14 @@ MonoBehaviour:
   _port: 13333
   numRetries: 5
   _grammar: 
-  numPredict: -1
+  numPredict: 48
   cachePrompt: 1
   seed: 0
   temperature: 0.2
-  topK: 40
-  topP: 0.9
-  minP: 0.05
-  repeatPenalty: 1.1
+  topK: 30
+  topP: 0.85
+  minP: 0.08
+  repeatPenalty: 1.05
   presencePenalty: 0
   frequencyPenalty: 0
   typicalP: 1
@@ -589,8 +589,8 @@ MonoBehaviour:
   overflowTargetRatio: 0.5
   overflowSummarizePrompt: 
   _slot: -1
-  _systemPrompt: A chat between a curious human and an artificial intelligence assistant.
-    The assistant gives helpful, detailed, and polite answers to the human's questions.
+  _systemPrompt: You are Nyxara, a concise, expressive companion. Respond briefly,
+    naturally, and follow the requested output format exactly.
 --- !u!114 &4853887671953219551
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -625,6 +625,7 @@ MonoBehaviour:
   actionGatekeeper: {fileID: 1535942756910133541}
   speakReplies: 1
   useStructuredParsing: 1
+  warmupOnStart: 1
   fallbackReply: I heard you, but I need a moment.
 --- !u!114 &8769894612757442499
 MonoBehaviour:

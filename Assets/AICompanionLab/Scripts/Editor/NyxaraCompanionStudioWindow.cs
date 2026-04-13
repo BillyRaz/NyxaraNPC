@@ -27,6 +27,7 @@ namespace Nyxara.AICompanion.Editor
         private enum StudioTab
         {
             Studio,
+            Status,
             Expression,
             Profile,
             Testing,
@@ -221,6 +222,9 @@ namespace Nyxara.AICompanion.Editor
                 case StudioTab.Studio:
                     DrawStudioTab();
                     break;
+                case StudioTab.Status:
+                    DrawStatusTab();
+                    break;
                 case StudioTab.Expression:
                     DrawExpressionTab();
                     break;
@@ -249,6 +253,7 @@ namespace Nyxara.AICompanion.Editor
         {
             GUILayout.BeginHorizontal();
             if (GUILayout.Button("Studio", EditorStyles.miniButtonLeft)) _currentTab = StudioTab.Studio;
+            if (GUILayout.Button("Status", EditorStyles.miniButtonMid)) _currentTab = StudioTab.Status;
             if (GUILayout.Button("Expression", EditorStyles.miniButtonMid)) _currentTab = StudioTab.Expression;
             if (GUILayout.Button("Profile", EditorStyles.miniButtonMid)) _currentTab = StudioTab.Profile;
             if (GUILayout.Button("Testing", EditorStyles.miniButtonMid)) _currentTab = StudioTab.Testing;
@@ -261,6 +266,7 @@ namespace Nyxara.AICompanion.Editor
             GUILayout.BeginHorizontal(EditorStyles.toolbar);
             GUILayout.Label("Quick Tools", GUILayout.Width(75f));
             if (GUILayout.Button("Studio", EditorStyles.toolbarButton)) _currentTab = StudioTab.Studio;
+            if (GUILayout.Button("Status", EditorStyles.toolbarButton)) _currentTab = StudioTab.Status;
             if (GUILayout.Button("Expression Window", EditorStyles.toolbarButton)) ExpressionEditorWindow.ShowWindow();
             if (GUILayout.Button("Lip Sync Window", EditorStyles.toolbarButton)) LipSyncEditorWindow.ShowWindow();
             if (GUILayout.Button("Diagnostics View", EditorStyles.toolbarButton)) _currentTab = StudioTab.Diagnostics;
@@ -286,6 +292,20 @@ namespace Nyxara.AICompanion.Editor
             DrawOptionsSection();
             EditorGUILayout.Space(8f);
             DrawBuildSection();
+        }
+
+        private void DrawStatusTab()
+        {
+            var studioRoot = ResolveStudioRootFromContext();
+            var llmAgent = studioRoot != null ? studioRoot.GetComponent<LLMAgent>() : FindFirstObjectByType<LLMAgent>();
+
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Status And Runtime Tuning", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox("Use this tab to inspect the live LLM runtime, set the desired values in Studio Config, and push them into the current root.", MessageType.Info);
+            DrawStatusPanel();
+            EditorGUILayout.Space(8f);
+            DrawLlmRuntimeConfigEditor(llmAgent, studioRoot);
+            EditorGUILayout.EndVertical();
         }
 
         private void DrawProfileTab()
@@ -358,7 +378,99 @@ namespace Nyxara.AICompanion.Editor
                 }
             }
 
+            DrawLiveLlmRuntimeStatus(llmAgent);
+
             EditorGUILayout.EndVertical();
+        }
+
+        private static void DrawLiveLlmRuntimeStatus(LLMAgent llmAgent)
+        {
+            if (llmAgent == null || llmAgent.llm == null)
+            {
+                return;
+            }
+
+            var contextSize = llmAgent.llm.contextSize;
+            var numThreads = llmAgent.llm.numThreads;
+            var numPredict = llmAgent.numPredict;
+            var cachePrompt = llmAgent.cachePrompt;
+            var isFastConfig = contextSize <= 4096 && numPredict <= 96;
+
+            EditorGUILayout.Space(6f);
+            EditorGUILayout.LabelField("Live LLM Runtime", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Context Size", contextSize.ToString());
+            EditorGUILayout.LabelField("Num Predict", numPredict.ToString());
+            EditorGUILayout.LabelField("Threads", numThreads.ToString());
+            EditorGUILayout.LabelField("Prompt Cache", cachePrompt ? "On" : "Off");
+
+            if (!isFastConfig)
+            {
+                EditorGUILayout.HelpBox(
+                    $"The live root is still using a heavier LLM config (context={contextSize}, numPredict={numPredict}). Run Apply Rig To Selected Studio Root or rebuild to push the faster runtime settings.",
+                    MessageType.Warning);
+            }
+        }
+
+        private void DrawLlmRuntimeConfigEditor(LLMAgent llmAgent, GameObject studioRoot)
+        {
+            EditorGUILayout.LabelField("Desired LLM Runtime", EditorStyles.boldLabel);
+            _config.llmContextSize = EditorGUILayout.IntField("Context Size", _config.llmContextSize);
+            _config.llmNumPredict = EditorGUILayout.IntField("Num Predict", _config.llmNumPredict);
+            _config.llmNumThreads = EditorGUILayout.IntField("Threads", _config.llmNumThreads);
+            _config.llmCachePrompt = EditorGUILayout.Toggle("Prompt Cache", _config.llmCachePrompt);
+            _config.llmTemperature = EditorGUILayout.Slider("Temperature", _config.llmTemperature, 0f, 1f);
+            _config.llmTopP = EditorGUILayout.Slider("Top P", _config.llmTopP, 0f, 1f);
+            _config.llmTopK = EditorGUILayout.IntField("Top K", _config.llmTopK);
+            _config.llmMinP = EditorGUILayout.Slider("Min P", _config.llmMinP, 0f, 1f);
+            _config.llmRepeatPenalty = EditorGUILayout.Slider("Repeat Penalty", _config.llmRepeatPenalty, 1f, 1.5f);
+
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Recommended Fast"))
+            {
+                _config.llmContextSize = 4096;
+                _config.llmNumPredict = 64;
+                _config.llmNumThreads = -1;
+                _config.llmCachePrompt = true;
+                _config.llmTemperature = 0.2f;
+                _config.llmTopP = 0.85f;
+                _config.llmTopK = 30;
+                _config.llmMinP = 0.08f;
+                _config.llmRepeatPenalty = 1.05f;
+                EditorUtility.SetDirty(_config);
+            }
+
+            GUI.enabled = llmAgent != null && llmAgent.llm != null;
+            if (GUILayout.Button("Use Live Values"))
+            {
+                _config.llmContextSize = llmAgent.llm.contextSize;
+                _config.llmNumPredict = llmAgent.numPredict;
+                _config.llmNumThreads = llmAgent.llm.numThreads;
+                _config.llmCachePrompt = llmAgent.cachePrompt;
+                _config.llmTemperature = llmAgent.temperature;
+                _config.llmTopP = llmAgent.topP;
+                _config.llmTopK = llmAgent.topK;
+                _config.llmMinP = llmAgent.minP;
+                _config.llmRepeatPenalty = llmAgent.repeatPenalty;
+                EditorUtility.SetDirty(_config);
+            }
+            GUI.enabled = true;
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
+            GUI.enabled = studioRoot != null;
+            if (GUILayout.Button("Apply Config To Live Root"))
+            {
+                NyxaraCompanionStudioBuilder.ApplyStudioRigToExistingRoot(_config, studioRoot);
+                PerformSystemScan();
+            }
+
+            if (GUILayout.Button("Rebuild With Config"))
+            {
+                NyxaraCompanionStudioBuilder.BuildStudioRoot(_config);
+                PerformSystemScan();
+            }
+            GUI.enabled = true;
+            EditorGUILayout.EndHorizontal();
         }
 
         private void DrawMicrophoneSection()
@@ -2187,6 +2299,8 @@ namespace Nyxara.AICompanion.Editor
                     report.configIssues.Add(new ConfigIssue { severity = IssueSeverity.Critical, component = "Studio", issue = "No source character assigned", suggestion = "Assign the model or prefab in the Studio tab" });
                 }
 
+                AppendLiveLlmDiagnostics(report, llmAgent);
+
                 if (string.IsNullOrWhiteSpace(_config.preferredFaceRendererPath))
                 {
                     report.configIssues.Add(new ConfigIssue { severity = IssueSeverity.Warning, component = "Studio", issue = "No preferred face renderer selected", suggestion = "Pick the head or face mesh from the renderer dropdown" });
@@ -2248,6 +2362,49 @@ namespace Nyxara.AICompanion.Editor
                 stopwatch.Stop();
                 report.durationMs = stopwatch.ElapsedMilliseconds;
                 return report;
+            }
+
+            private static void AppendLiveLlmDiagnostics(SystemDiagnosticsReport report, LLMAgent llmAgent)
+            {
+                if (report == null || llmAgent == null || llmAgent.llm == null)
+                {
+                    return;
+                }
+
+                var contextSize = llmAgent.llm.contextSize;
+                var numThreads = llmAgent.llm.numThreads;
+                var numPredict = llmAgent.numPredict;
+                var cachePrompt = llmAgent.cachePrompt;
+
+                report.configIssues.Add(new ConfigIssue
+                {
+                    severity = IssueSeverity.Info,
+                    component = "LLM",
+                    issue = $"Live runtime config: contextSize={contextSize}, numPredict={numPredict}, numThreads={numThreads}, cachePrompt={(cachePrompt ? "on" : "off")}",
+                    suggestion = "Use this to verify the active scene root is actually running the intended fast settings"
+                });
+
+                if (contextSize > 4096)
+                {
+                    report.configIssues.Add(new ConfigIssue
+                    {
+                        severity = IssueSeverity.Warning,
+                        component = "LLM",
+                        issue = $"Live contextSize is {contextSize}, which is heavier than the intended fast setting",
+                        suggestion = "Run Apply Rig To Selected Studio Root or rebuild so the active LLM uses a 4096 context window"
+                    });
+                }
+
+                if (numPredict > 96)
+                {
+                    report.configIssues.Add(new ConfigIssue
+                    {
+                        severity = IssueSeverity.Warning,
+                        component = "LLM",
+                        issue = $"Live numPredict is {numPredict}, which may slow replies",
+                        suggestion = "Lower numPredict on the live root if you want faster spoken response turns"
+                    });
+                }
             }
 
             private static void AppendFaceRendererDiagnostics(SystemDiagnosticsReport report, ExpressionLibraryManager expressionLibrary, ArkItBlendshapeDriver faceDriver)

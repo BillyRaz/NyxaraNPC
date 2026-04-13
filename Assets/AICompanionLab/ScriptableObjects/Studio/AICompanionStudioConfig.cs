@@ -41,6 +41,17 @@ namespace Nyxara.AICompanion.Studio
         public KeyCode runtimeMicHoldKey = KeyCode.V;
         public KeyCode runtimePromptPopupKey = KeyCode.T;
 
+        [Header("LLM Runtime")]
+        public int llmContextSize = 4096;
+        public int llmNumThreads = -1;
+        public int llmNumPredict = 96;
+        public bool llmCachePrompt = true;
+        public float llmTemperature = 0.2f;
+        public float llmTopP = 0.85f;
+        public int llmTopK = 30;
+        public float llmMinP = 0.08f;
+        public float llmRepeatPenalty = 1.05f;
+
         [Header("Studio Framing")]
         public Vector3 characterLocalPosition = Vector3.zero;
         public Vector3 characterLocalEuler = Vector3.zero;

@@ -61,6 +61,11 @@
 - Faster response pipeline and reduced first-token latency
 - True push-to-talk / voice-chat mode with optional auto-listen loop
 - Better in-scene runtime UI for conversation and debugging
+- Server-backed LLM support as an optional alternative to local runtime inference
+- Server-backed STT and TTS support as optional linked services
+- A dedicated `Server` tab for service login, host/IP, API keys, model IDs, and other provider-specific connection settings
+- Status-tab controls for replacing local LLM/STT/TTS model paths directly from the editor
+- Status-tab controls for switching between local file paths and remote model/service IDs
 - Input System-native rebinding UI
 - Character rig validation wizard
 - Guided lipsync calibration workflow

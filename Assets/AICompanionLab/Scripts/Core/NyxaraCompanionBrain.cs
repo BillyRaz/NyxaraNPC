@@ -32,6 +32,7 @@ namespace Nyxara.AICompanion.Core
         [Header("Settings")]
         [SerializeField] private bool speakReplies = true;
         [SerializeField] private bool useStructuredParsing = true;
+        [SerializeField] private bool warmupOnStart = true;
         [SerializeField] private string fallbackReply = "I heard you, but I need a moment.";
 
         private PromptBuilder _promptBuilder;
@@ -68,6 +69,24 @@ namespace Nyxara.AICompanion.Core
             }
         }
 
+        private async void Start()
+        {
+            if (!Application.isPlaying || !warmupOnStart || agent == null)
+            {
+                return;
+            }
+
+            try
+            {
+                await agent.Warmup(_promptBuilder.BuildMinimalPrompt(characterProfile, "Hello."));
+                Debug.Log("[Nyxara Runtime] LLM warmup completed.");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[Nyxara Runtime] LLM warmup failed: {ex.Message}");
+            }
+        }
+
         public async Task<string> ReplyToAsync(string userText)
         {
             if (IsBusy)
@@ -89,7 +108,6 @@ namespace Nyxara.AICompanion.Core
 
             IsBusy = true;
             faceDriver?.SetThinking(true);
-            memoryController?.AddPlayerMessage(userText);
 
             try
             {
@@ -97,10 +115,10 @@ namespace Nyxara.AICompanion.Core
 
                 var memoryString = memoryController?.GetMemoryString() ?? "";
                 var prompt = _promptBuilder.BuildPrompt(characterProfile, runtimeState, userText, memoryString);
-                var rawResponse = await agent.Chat(prompt);
+                var rawResponse = await agent.Chat(prompt, null, null, false);
                 _generationTimer.Stop();
 
-                Debug.Log($"Generation took {_generationTimer.ElapsedMilliseconds}ms");
+                Debug.Log($"Generation took {_generationTimer.ElapsedMilliseconds}ms | Prompt chars: {prompt.Length}");
 
                 if (string.IsNullOrWhiteSpace(rawResponse))
                 {
@@ -136,6 +154,7 @@ namespace Nyxara.AICompanion.Core
 
                 LastReply = finalDialogue;
                 ReplyReady?.Invoke(finalDialogue);
+                memoryController?.AddPlayerMessage(userText);
                 memoryController?.AddNPCResponse(finalDialogue, parsedResponse?.intent ?? "unknown");
 
                 if (speakReplies && ttsService != null)
