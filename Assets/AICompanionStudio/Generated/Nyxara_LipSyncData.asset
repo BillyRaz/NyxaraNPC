@@ -1,0 +1,50 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b2002ca6f4f573042a89f7472cccf0be, type: 3}
+  m_Name: Nyxara_LipSyncData
+  m_EditorClassIdentifier: Assembly-CSharp::Nyxara.AICompanion.LipSync.LipSyncData
+  visemeMappings:
+  - viseme: 1
+    blendshapeName: jawOpen
+    intensity: 27.9
+    jawOpenContribution: 1
+  - viseme: 2
+    blendshapeName: mouthSmileLeft, mouthSmileRight
+    intensity: 40
+    jawOpenContribution: 0.15
+  - viseme: 3
+    blendshapeName: mouthPucker
+    intensity: 80
+    jawOpenContribution: 0.2
+  - viseme: 4
+    blendshapeName: mouthFunnel
+    intensity: 59.4
+    jawOpenContribution: 0.3
+  - viseme: 5
+    blendshapeName: mouthStretchLeft, mouthStretchRight
+    intensity: 35
+    jawOpenContribution: 0.15
+  - viseme: 15
+    blendshapeName: mouthPressLeft, mouthPressRight
+    intensity: 30
+    jawOpenContribution: 0.05
+  - viseme: 19
+    blendshapeName: mouthClose
+    intensity: 36.7
+    jawOpenContribution: 0
+  - viseme: 0
+    blendshapeName: mouthClose
+    intensity: 0
+    jawOpenContribution: 0
+  smoothTime: 0.08
+  jawOpenMultiplier: 0.6
+  showDebugInfo: 0

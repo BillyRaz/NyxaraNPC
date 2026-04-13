@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace Nyxara.AICompanion.LipSync
@@ -25,6 +26,16 @@ namespace Nyxara.AICompanion.LipSync
         public string blendshapeName;
         [Range(0f, 100f)] public float intensity = 100f;
         public float jawOpenContribution;
+
+        public IEnumerable<string> EnumerateBlendshapeNames()
+        {
+            return string.IsNullOrWhiteSpace(blendshapeName)
+                ? Enumerable.Empty<string>()
+                : blendshapeName
+                    .Split(new[] { ',', ';', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(name => name.Trim())
+                    .Where(name => !string.IsNullOrWhiteSpace(name));
+        }
     }
 
     public enum Viseme

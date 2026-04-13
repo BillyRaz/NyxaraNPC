@@ -16,11 +16,13 @@ namespace Nyxara.AICompanion.LipSync
 
         [Header("Runtime Settings")]
         [SerializeField] private bool enableLipSync = true;
-        [SerializeField] private float mouthOpenAmount = 0.7f;
+        [SerializeField] private float mouthOpenAmount = 0.45f;
         [SerializeField] private bool expressionModeActive;
-        [SerializeField] private float lowerLipDropAmount = 0.35f;
-        [SerializeField] private float upperLipRaiseAmount = 0.18f;
-        [SerializeField] private float mouthStretchAmount = 0.12f;
+        [SerializeField] private float visemeIntensityScale = 0.6f;
+        [SerializeField] private float lowerLipDropAmount = 0.18f;
+        [SerializeField] private float upperLipRaiseAmount = 0.08f;
+        [SerializeField] private float mouthStretchAmount = 0.06f;
+        [SerializeField] private float releaseDuration = 0.08f;
 
         private Coroutine _lipSyncCoroutine;
 
@@ -39,7 +41,7 @@ namespace Nyxara.AICompanion.LipSync
             }
         }
 
-        public async Task SpeakWithLipSync(string text)
+        public async Task SpeakWithLipSync(string text, float clipDuration = -1f)
         {
             if (expressionModeActive)
             {
@@ -65,24 +67,41 @@ namespace Nyxara.AICompanion.LipSync
 
             IsSpeaking = true;
             var phonemeTimeline = await phonemeExtractor.ExtractPhonemesFromText(text);
+            phonemeTimeline = RetimeTimelineToClipDuration(phonemeTimeline, clipDuration);
             _lipSyncCoroutine = StartCoroutine(ProcessLipSyncTimeline(phonemeTimeline));
         }
 
         private IEnumerator ProcessLipSyncTimeline(List<PiperTTSPhonemeExtractor.VisemeFrame> timeline)
         {
-            foreach (var frame in timeline)
+            if (timeline == null || timeline.Count == 0)
             {
-                ApplyViseme(frame.viseme);
-                var elapsed = 0f;
-                while (elapsed < frame.duration)
+                yield return ReleaseToSilence();
+                _lipSyncCoroutine = null;
+                IsSpeaking = false;
+                yield break;
+            }
+
+            for (var i = 0; i < timeline.Count; i++)
+            {
+                var currentFrame = timeline[i];
+                var nextFrame = i + 1 < timeline.Count ? timeline[i + 1] : new PiperTTSPhonemeExtractor.VisemeFrame
                 {
-                    ApplySmoothBlend(frame.viseme, frame.duration <= 0f ? 1f : elapsed / frame.duration);
+                    viseme = Viseme.sil,
+                    duration = releaseDuration
+                };
+
+                var duration = Mathf.Max(0.02f, currentFrame.duration);
+                var elapsed = 0f;
+                while (elapsed < duration)
+                {
+                    var t = Mathf.Clamp01(elapsed / duration);
+                    ApplyFrameBlend(currentFrame.viseme, nextFrame.viseme, Mathf.SmoothStep(0f, 1f, t));
                     elapsed += Time.deltaTime;
                     yield return null;
                 }
             }
 
-            ApplyViseme(Viseme.sil);
+            yield return ReleaseToSilence();
             _lipSyncCoroutine = null;
             IsSpeaking = false;
         }
@@ -94,33 +113,45 @@ namespace Nyxara.AICompanion.LipSync
                 return;
             }
 
-            foreach (var mapping in lipSyncData.visemeMappings)
-            {
-                SetBlendshapeWeight(mapping.blendshapeName, 0f);
-            }
+            ResetMappedBlendshapes();
 
             var mappingForViseme = lipSyncData.visemeMappings.Find(m => m.viseme == viseme);
             if (mappingForViseme != null)
             {
-                SetBlendshapeWeight(mappingForViseme.blendshapeName, mappingForViseme.intensity);
+                SetMappingWeight(mappingForViseme, mappingForViseme.intensity * visemeIntensityScale);
             }
 
-            ApplyJawOpen(viseme == Viseme.sil ? 0f : mouthOpenAmount);
+            var jawContribution = mappingForViseme != null ? mappingForViseme.jawOpenContribution : 0f;
+            ApplyJawOpen(jawContribution * mouthOpenAmount);
         }
 
-        private void ApplySmoothBlend(Viseme viseme, float t)
+        private void ApplyFrameBlend(Viseme currentViseme, Viseme nextViseme, float t)
         {
             if (GetAllRenderers().Count == 0 || lipSyncData == null)
             {
                 return;
             }
 
-            var mapping = lipSyncData.visemeMappings.Find(m => m.viseme == viseme);
-            if (mapping != null)
+            ResetMappedBlendshapes();
+
+            var currentMapping = ResolveMapping(currentViseme);
+            var nextMapping = ResolveMapping(nextViseme);
+
+            if (currentMapping != null)
             {
-                var smoothedWeight = Mathf.SmoothStep(0f, mapping.intensity, Mathf.Sin(Mathf.Clamp01(t) * Mathf.PI));
-                SetBlendshapeWeight(mapping.blendshapeName, smoothedWeight);
+                var currentWeight = Mathf.Lerp(currentMapping.intensity * visemeIntensityScale, 0f, t);
+                SetMappingWeight(currentMapping, currentWeight);
             }
+
+            if (nextMapping != null && nextMapping != currentMapping)
+            {
+                var nextWeight = Mathf.Lerp(0f, nextMapping.intensity * visemeIntensityScale, t);
+                SetMappingWeight(nextMapping, nextWeight);
+            }
+
+            var currentJaw = currentMapping != null ? currentMapping.jawOpenContribution : 0f;
+            var nextJaw = nextMapping != null ? nextMapping.jawOpenContribution : 0f;
+            ApplyJawOpen(Mathf.Lerp(currentJaw, nextJaw, t) * mouthOpenAmount);
         }
 
         private void ApplyJawOpen(float amount)
@@ -149,13 +180,13 @@ namespace Nyxara.AICompanion.LipSync
             const float duration = 1f;
             while (timer < duration)
             {
-                var jawWeight = Mathf.PingPong(timer * 20f, 50f);
+                var jawWeight = Mathf.PingPong(timer * 8f, 28f);
                 ApplyJawOpen(jawWeight / 100f);
                 timer += Time.deltaTime;
                 yield return null;
             }
 
-            ApplyJawOpen(0f);
+            yield return ReleaseToSilence();
             IsSpeaking = false;
         }
 
@@ -183,6 +214,83 @@ namespace Nyxara.AICompanion.LipSync
         private void OnDestroy()
         {
             StopLipSync();
+        }
+
+        private List<PiperTTSPhonemeExtractor.VisemeFrame> RetimeTimelineToClipDuration(List<PiperTTSPhonemeExtractor.VisemeFrame> timeline, float clipDuration)
+        {
+            if (timeline == null || timeline.Count == 0 || clipDuration <= 0f)
+            {
+                return timeline ?? new List<PiperTTSPhonemeExtractor.VisemeFrame>();
+            }
+
+            var sourceDuration = timeline.Sum(frame => Mathf.Max(0f, frame.duration));
+            if (sourceDuration <= 0.001f)
+            {
+                return timeline;
+            }
+
+            var scale = clipDuration / sourceDuration;
+            var retimed = new List<PiperTTSPhonemeExtractor.VisemeFrame>(timeline.Count);
+            var timestamp = 0f;
+            foreach (var frame in timeline)
+            {
+                var duration = Mathf.Max(0.02f, frame.duration * scale);
+                retimed.Add(new PiperTTSPhonemeExtractor.VisemeFrame
+                {
+                    viseme = frame.viseme,
+                    timestamp = timestamp,
+                    duration = duration
+                });
+                timestamp += duration;
+            }
+
+            return retimed;
+        }
+
+        private IEnumerator ReleaseToSilence()
+        {
+            var elapsed = 0f;
+            while (elapsed < releaseDuration)
+            {
+                var t = Mathf.Clamp01(elapsed / Mathf.Max(0.01f, releaseDuration));
+                ApplyFrameBlend(Viseme.sil, Viseme.sil, t);
+                elapsed += Time.deltaTime;
+                yield return null;
+            }
+
+            ResetMappedBlendshapes();
+            ApplyJawOpen(0f);
+        }
+
+        private VisemeMapping ResolveMapping(Viseme viseme)
+        {
+            return lipSyncData != null ? lipSyncData.visemeMappings.Find(m => m.viseme == viseme) : null;
+        }
+
+        private void ResetMappedBlendshapes()
+        {
+            if (lipSyncData == null)
+            {
+                return;
+            }
+
+            foreach (var mapping in lipSyncData.visemeMappings)
+            {
+                SetMappingWeight(mapping, 0f);
+            }
+        }
+
+        private void SetMappingWeight(VisemeMapping mapping, float weight)
+        {
+            if (mapping == null)
+            {
+                return;
+            }
+
+            foreach (var blendshapeName in mapping.EnumerateBlendshapeNames())
+            {
+                SetBlendshapeWeight(blendshapeName, weight);
+            }
         }
 
         private void SetBlendshapeWeight(string blendshapeName, float weight)

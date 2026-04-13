@@ -373,6 +373,7 @@ GameObject:
   - component: {fileID: 2313069129859418774}
   - component: {fileID: 5734700702302276749}
   - component: {fileID: 4682965648266017537}
+  - component: {fileID: 8819401062275033065}
   m_Layer: 0
   m_Name: Nyxara_StudioRoot
   m_TagString: Untagged
@@ -623,15 +624,17 @@ MonoBehaviour:
   - {fileID: 7063091265598078135}
   - {fileID: 2290229364071923943}
   - {fileID: 5542508331591896011}
-  lipSyncData: {fileID: 0}
+  lipSyncData: {fileID: 11400000, guid: 2e6218c7001ce6d4b9fd947c299182e3, type: 2}
   phonemeExtractor: {fileID: 5734700702302276749}
   audioSource: {fileID: 5722706099437050290}
   enableLipSync: 1
-  mouthOpenAmount: 0.7
+  mouthOpenAmount: 0.45
   expressionModeActive: 0
-  lowerLipDropAmount: 0.35
-  upperLipRaiseAmount: 0.18
-  mouthStretchAmount: 0.12
+  visemeIntensityScale: 0.6
+  lowerLipDropAmount: 0.18
+  upperLipRaiseAmount: 0.08
+  mouthStretchAmount: 0.06
+  releaseDuration: 0.08
 --- !u!114 &5734700702302276749
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -658,6 +661,25 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f2a6186e5b34ca540a38fc9de78282a3, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Nyxara.AICompanion.Core.CompanionBootstrap
+--- !u!114 &8819401062275033065
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4766607375452302102}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d1c95bdafcc14ff8bbd4b5879e72d8cf, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Nyxara.AICompanion.UI.RuntimeConversationOverlay
+  whisperInput: {fileID: 5077795463050489266}
+  companionBrain: {fileID: 9082637554266286310}
+  micHoldKey: 300
+  promptPopupKey: 295
+  showOverlay: 1
+  showPromptPopup: 0
+  promptText: Hello Nyxara.
 --- !u!1 &5183244394027964574
 GameObject:
   m_ObjectHideFlags: 0

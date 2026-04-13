@@ -35,6 +35,12 @@ namespace Nyxara.AICompanion.Studio
         public bool createStudioCamera = true;
         public bool createStudioLights = true;
 
+        [Header("Runtime Input")]
+        public bool enableRuntimeConversationOverlay = true;
+        public bool showRuntimeConversationOverlay = true;
+        public KeyCode runtimeMicHoldKey = KeyCode.V;
+        public KeyCode runtimePromptPopupKey = KeyCode.T;
+
         [Header("Studio Framing")]
         public Vector3 characterLocalPosition = Vector3.zero;
         public Vector3 characterLocalEuler = Vector3.zero;

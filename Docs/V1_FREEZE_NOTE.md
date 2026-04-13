@@ -1,0 +1,72 @@
+# V1 Freeze Note
+
+## What V1 Includes
+
+- Unity studio builder for creating a companion root from a source character or existing root
+- Local LLM wiring through LLMUnity
+- Local STT wiring through Whisper
+- Local TTS wiring through Piper
+- Expression library authoring and preset save/load/delete flow
+- ARKit-style expression builder inside the main studio window
+- Multi-renderer face support for split meshes such as head, lashes, eyes, and mouth
+- Runtime face driver, signal router, and lip sync integration
+- Expression Mode for separating full-face authoring from runtime lip-sync control
+- System scan and diagnostics tooling
+- Status Panel for quick connection checks
+- Testing tab with:
+  - imported voice playback test
+  - lip sync test
+  - full system test
+  - live lip mixer
+- Profile tab with:
+  - companion bio editing
+  - prompt sender
+  - profile JSON editing
+  - runtime JSON editing
+- Runtime in-scene conversation overlay with:
+  - hold-to-talk microphone flow
+  - release-to-send behavior
+  - typed prompt popup
+  - status display
+
+## What Is Intentionally Excluded
+
+- Final facial rig perfection
+- Advanced viseme authoring tools beyond current editor flow
+- Fully automated STT streaming conversation loop without hold/release input
+- Rich in-game UI styling for runtime conversation controls
+- Mobile-specific input handling
+- Full input rebinding UI
+- Production-grade persistence for all runtime tuning controls
+- Advanced memory editing and memory visualization tools
+- Emotion planner / behavior tree level AI orchestration
+- Multiplayer or networked companion support
+- Cloud model fallback support
+- Formal save/load game integration
+
+## Known Polish Items
+
+- Companion response speed still needs optimization
+- LLM startup and first-response latency are still high
+- Lip sync timing can still need tuning per character rig
+- Rig quality strongly affects teeth, jaw, and tongue realism
+- Runtime overlay is functional but visually basic
+- Microphone flow should be tested more heavily against different microphones and input backends
+- Some runtime/editor settings still require rebuild or reapply steps after changes
+- Testing and diagnostics output can still be condensed into clearer summaries
+- Character-specific expression/lip presets may still need manual tuning after rebuild
+
+## Future Expansion List
+
+- Faster response pipeline and reduced first-token latency
+- True push-to-talk / voice-chat mode with optional auto-listen loop
+- Better in-scene runtime UI for conversation and debugging
+- Input System-native rebinding UI
+- Character rig validation wizard
+- Guided lipsync calibration workflow
+- Better profile authoring UI with field-level editing and validation
+- Runtime memory inspector and authoring tools
+- More advanced action execution and behavior planning
+- Safer automatic fallback handling when LLM, STT, or TTS are missing
+- One-click deployment presets for desktop builds
+- Per-character tuning profiles for facial weights, lip sync, and response style

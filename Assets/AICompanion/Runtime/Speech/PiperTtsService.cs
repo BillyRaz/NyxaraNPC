@@ -62,11 +62,6 @@ namespace Nyxara.AICompanion.Speech
 
             var outputPath = Path.Combine(Application.persistentDataPath, outputFileName);
 
-            if (useLipSync && lipSyncController != null)
-            {
-                _ = lipSyncController.SpeakWithLipSync(text);
-            }
-
             await RunPiperAsync(text, outputPath);
 
             var clip = await LoadClipAsync(outputPath);
@@ -74,6 +69,12 @@ namespace Nyxara.AICompanion.Speech
             {
                 audioSource.clip = clip;
                 audioSource.Play();
+
+                if (useLipSync && lipSyncController != null)
+                {
+                    _ = lipSyncController.SpeakWithLipSync(text, clip.length);
+                }
+
                 if (faceDriver != null)
                 {
                     faceDriver.SetSpeaking(true);

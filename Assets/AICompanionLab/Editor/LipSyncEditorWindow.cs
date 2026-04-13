@@ -12,13 +12,27 @@ namespace Nyxara.AICompanion.Editor
         private LipSyncData _lipSyncData;
         private Vector2 _scrollPosition;
         private string _testPhrase = "Hello, how are you today?";
+        private readonly Dictionary<int, float> _previewWeights = new();
+        private Dictionary<int, float> _targetPreviewWeights = new();
+        private double _lastPreviewUpdateTime;
 
         [MenuItem("Nyxara/AI Companion/Lip Sync Editor")]
         public static void ShowWindow()
         {
             var window = GetWindow<LipSyncEditorWindow>("Lip Sync Editor");
-            window.minSize = new Vector2(500, 600);
+            window.minSize = new Vector2(760, 640);
             window.Show();
+        }
+
+        private void OnEnable()
+        {
+            EditorApplication.update += UpdatePreview;
+            _lastPreviewUpdateTime = EditorApplication.timeSinceStartup;
+        }
+
+        private void OnDisable()
+        {
+            EditorApplication.update -= UpdatePreview;
         }
 
         private void OnGUI()
@@ -47,9 +61,9 @@ namespace Nyxara.AICompanion.Editor
                 var mapping = _lipSyncData.visemeMappings[i];
                 EditorGUILayout.BeginHorizontal("box");
                 mapping.viseme = (Viseme)EditorGUILayout.EnumPopup(mapping.viseme, GUILayout.Width(100));
-                mapping.blendshapeName = EditorGUILayout.TextField(mapping.blendshapeName);
-                mapping.intensity = EditorGUILayout.Slider(mapping.intensity, 0f, 100f, GUILayout.Width(120));
-                mapping.jawOpenContribution = EditorGUILayout.Slider(mapping.jawOpenContribution, 0f, 1f, GUILayout.Width(120));
+                mapping.blendshapeName = EditorGUILayout.TextField(mapping.blendshapeName, GUILayout.MinWidth(260), GUILayout.ExpandWidth(true));
+                mapping.intensity = EditorGUILayout.Slider(mapping.intensity, 0f, 100f, GUILayout.Width(170));
+                mapping.jawOpenContribution = EditorGUILayout.Slider(mapping.jawOpenContribution, 0f, 1f, GUILayout.Width(170));
 
                 if (GUILayout.Button("Test", GUILayout.Width(50)))
                 {
@@ -72,6 +86,8 @@ namespace Nyxara.AICompanion.Editor
                 _lipSyncData.visemeMappings.Add(new VisemeMapping { viseme = Viseme.sil, blendshapeName = "", intensity = 0f });
                 EditorUtility.SetDirty(_lipSyncData);
             }
+
+            EditorGUILayout.HelpBox("Blendshape(s) supports multiple names separated by commas. Example: mouthSmileLeft, mouthSmileRight", MessageType.None);
 
             EditorGUILayout.Space(10);
             EditorGUILayout.LabelField("Animation Settings", EditorStyles.boldLabel);
@@ -129,15 +145,14 @@ namespace Nyxara.AICompanion.Editor
                 return;
             }
 
-            for (var i = 0; i < _targetRenderer.sharedMesh.blendShapeCount; i++)
+            _targetPreviewWeights = new Dictionary<int, float>();
+            foreach (var blendshapeName in mapping.EnumerateBlendshapeNames())
             {
-                _targetRenderer.SetBlendShapeWeight(i, 0f);
-            }
-
-            var index = _targetRenderer.sharedMesh.GetBlendShapeIndex(mapping.blendshapeName);
-            if (index >= 0)
-            {
-                _targetRenderer.SetBlendShapeWeight(index, mapping.intensity);
+                var index = _targetRenderer.sharedMesh.GetBlendShapeIndex(blendshapeName);
+                if (index >= 0)
+                {
+                    _targetPreviewWeights[index] = mapping.intensity;
+                }
             }
         }
 
@@ -151,6 +166,44 @@ namespace Nyxara.AICompanion.Editor
             else
             {
                 Debug.LogWarning("No VisemeLipSyncController found in scene");
+            }
+        }
+
+        private void UpdatePreview()
+        {
+            if (_targetRenderer == null || _targetRenderer.sharedMesh == null)
+            {
+                return;
+            }
+
+            var now = EditorApplication.timeSinceStartup;
+            var deltaTime = Mathf.Max(0.001f, (float)(now - _lastPreviewUpdateTime));
+            _lastPreviewUpdateTime = now;
+            var smoothing = _lipSyncData != null ? Mathf.Max(0.01f, _lipSyncData.smoothTime) : 0.08f;
+            var lerpFactor = 1f - Mathf.Exp(-deltaTime / smoothing);
+
+            var changed = false;
+            for (var i = 0; i < _targetRenderer.sharedMesh.blendShapeCount; i++)
+            {
+                var targetWeight = _targetPreviewWeights.TryGetValue(i, out var foundWeight) ? foundWeight : 0f;
+                var currentWeight = _previewWeights.TryGetValue(i, out var cachedWeight) ? cachedWeight : _targetRenderer.GetBlendShapeWeight(i);
+                var nextWeight = Mathf.Lerp(currentWeight, targetWeight, lerpFactor);
+
+                if (Mathf.Abs(nextWeight - currentWeight) > 0.01f)
+                {
+                    _targetRenderer.SetBlendShapeWeight(i, nextWeight);
+                    _previewWeights[i] = nextWeight;
+                    changed = true;
+                }
+                else if (!_previewWeights.ContainsKey(i))
+                {
+                    _previewWeights[i] = nextWeight;
+                }
+            }
+
+            if (changed)
+            {
+                Repaint();
             }
         }
     }

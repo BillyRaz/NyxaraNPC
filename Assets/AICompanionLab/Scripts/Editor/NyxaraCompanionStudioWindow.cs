@@ -6,6 +6,7 @@ using System.Linq;
 using LLMUnity;
 using Nyxara.AICompanion.Configuration;
 using Nyxara.AICompanion.Core;
+using Nyxara.AICompanion.Data;
 using Nyxara.AICompanion.Diagnostics;
 using Nyxara.AICompanion.Expressions;
 using Nyxara.AICompanion.Face;
@@ -20,12 +21,15 @@ namespace Nyxara.AICompanion.Editor
     public class NyxaraCompanionStudioWindow : EditorWindow
     {
         private const string DefaultConfigPath = "Assets/AICompanionStudio/Generated/AICompanionStudioConfig.asset";
+        private const string StudioTabPrefsKey = "NyxaraStudio.CurrentTab";
+        private const string DiagnosticsTabPrefsKey = "NyxaraStudio.DiagnosticsTab";
 
         private enum StudioTab
         {
             Studio,
             Expression,
-            LipSync,
+            Profile,
+            Testing,
             Diagnostics
         }
 
@@ -49,6 +53,40 @@ namespace Nyxara.AICompanion.Editor
             public LogType Type;
         }
 
+        private readonly struct LipControlDefinition
+        {
+            public readonly string Key;
+            public readonly string Label;
+            public readonly float Max;
+            public readonly string[] Blendshapes;
+
+            public LipControlDefinition(string key, string label, float max, params string[] blendshapes)
+            {
+                Key = key;
+                Label = label;
+                Max = max;
+                Blendshapes = blendshapes;
+            }
+        }
+
+        private readonly struct StudioStatusItem
+        {
+            public readonly string Label;
+            public readonly bool IsReady;
+            public readonly string ReadyText;
+            public readonly string MissingText;
+            public readonly string MissingGuidance;
+
+            public StudioStatusItem(string label, bool isReady, string readyText, string missingText, string missingGuidance)
+            {
+                Label = label;
+                IsReady = isReady;
+                ReadyText = readyText;
+                MissingText = missingText;
+                MissingGuidance = missingGuidance;
+            }
+        }
+
         private Vector2 _scrollPosition;
         private AICompanionStudioConfig _config;
         private StudioTab _currentTab;
@@ -65,6 +103,21 @@ namespace Nyxara.AICompanion.Editor
         private LipSyncData _lipSyncData;
         private ExpressionPreset _selectedExpressionPreset;
         private bool _expressionModeEnabled;
+        private string _lipSyncTestLine = "Testing lip sync. Jaw, mouth, tongue, and voice should all respond together.";
+        private string _llmTestPrompt = "Give me a short in-character greeting and one sentence about how you're feeling.";
+        private string _llmTestReply = string.Empty;
+        private string _fullSystemTestPrompt = "Hello Nyxara. Please greet me briefly, say how you are feeling, and end with a short invitation to continue talking.";
+        private string _fullSystemTestStatus = string.Empty;
+        private string _microphoneTranscript = string.Empty;
+        private AudioClip _testingVoiceClip;
+        private string _profileJson = string.Empty;
+        private string _runtimeJson = string.Empty;
+        private float _lipResponseStart = 0f;
+        private float _lipResponseEnd = 1f;
+        private float _lipResponseFalloff = 1.35f;
+        private float _lipResponseSmoothing = 12f;
+        private readonly Dictionary<string, float> _lipTargetValues = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, float> _lipAppliedValues = new(StringComparer.OrdinalIgnoreCase);
         private string _builderPresetName = "New ARKit Expression";
         private string _builderDescription = string.Empty;
         private ExpressionCategory _builderCategory = ExpressionCategory.Emotion;
@@ -72,6 +125,19 @@ namespace Nyxara.AICompanion.Editor
         private readonly Dictionary<string, string> _builderBlendshapeMap = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, float> _builderWeights = new(StringComparer.OrdinalIgnoreCase);
         private readonly List<string> _builderBlendshapeOptions = new();
+        private static readonly LipControlDefinition[] LipControls =
+        {
+            new("jaw_open", "Jaw Open", 27.9f, "jawOpen"),
+            new("mouth_close", "Mouth Close", 36.7f, "mouthClose"),
+            new("mouth_funnel", "Mouth Funnel", 59.4f, "mouthFunnel"),
+            new("mouth_pucker", "Mouth Pucker", 80f, "mouthPucker"),
+            new("mouth_smile_pair", "Smile Left/Right", 40f, "mouthSmileLeft", "mouthSmileRight"),
+            new("mouth_frown_pair", "Frown Left/Right", 50f, "mouthFrownLeft", "mouthFrownRight"),
+            new("mouth_dimple_pair", "Dimple Left/Right", 35f, "mouthDimpleLeft", "mouthDimpleRight"),
+            new("mouth_stretch_pair", "Stretch Left/Right", 35f, "mouthStretchLeft", "mouthStretchRight"),
+            new("mouth_roll_pair", "Roll Lower/Upper", 30f, "mouthRollLower", "mouthRollUpper"),
+            new("mouth_shrug_pair", "Shrug Lower/Upper", 50f, "mouthShrugLower", "mouthShrugUpper")
+        };
 
         [MenuItem("Nyxara/AI Companion/Studio")]
         public static void ShowWindow()
@@ -85,7 +151,7 @@ namespace Nyxara.AICompanion.Editor
         {
             _config = LoadOrCreateConfig();
             ApplyDefaultPathsIfEmpty(_config);
-            ResetWindowState();
+            ResetWindowState(false);
             Application.logMessageReceived += OnLogMessageReceived;
             EditorApplication.update += OnEditorUpdate;
             FindRuntimeMonitor();
@@ -99,6 +165,11 @@ namespace Nyxara.AICompanion.Editor
 
         private void OnEditorUpdate()
         {
+            if (_currentTab == StudioTab.Testing && EditorApplication.isPlaying)
+            {
+                UpdateTestingLipPreview();
+            }
+
             if (_currentTab != StudioTab.Diagnostics || _diagnosticsTab != DiagnosticsTab.Runtime || !EditorApplication.isPlaying)
             {
                 return;
@@ -153,8 +224,11 @@ namespace Nyxara.AICompanion.Editor
                 case StudioTab.Expression:
                     DrawExpressionTab();
                     break;
-                case StudioTab.LipSync:
-                    DrawLipSyncTab();
+                case StudioTab.Profile:
+                    DrawProfileTab();
+                    break;
+                case StudioTab.Testing:
+                    DrawTestingTab();
                     break;
                 case StudioTab.Diagnostics:
                     DrawDiagnosticsTab();
@@ -167,6 +241,8 @@ namespace Nyxara.AICompanion.Editor
             {
                 EditorUtility.SetDirty(_config);
             }
+
+            PersistWindowSelection();
         }
 
         private void DrawMainTabs()
@@ -174,7 +250,8 @@ namespace Nyxara.AICompanion.Editor
             GUILayout.BeginHorizontal();
             if (GUILayout.Button("Studio", EditorStyles.miniButtonLeft)) _currentTab = StudioTab.Studio;
             if (GUILayout.Button("Expression", EditorStyles.miniButtonMid)) _currentTab = StudioTab.Expression;
-            if (GUILayout.Button("Lip Sync", EditorStyles.miniButtonMid)) _currentTab = StudioTab.LipSync;
+            if (GUILayout.Button("Profile", EditorStyles.miniButtonMid)) _currentTab = StudioTab.Profile;
+            if (GUILayout.Button("Testing", EditorStyles.miniButtonMid)) _currentTab = StudioTab.Testing;
             if (GUILayout.Button("Diagnostics", EditorStyles.miniButtonRight)) _currentTab = StudioTab.Diagnostics;
             GUILayout.EndHorizontal();
         }
@@ -196,6 +273,10 @@ namespace Nyxara.AICompanion.Editor
         {
             DrawOverviewSection();
             EditorGUILayout.Space(8f);
+            DrawStatusPanel();
+            EditorGUILayout.Space(8f);
+            DrawMicrophoneSection();
+            EditorGUILayout.Space(8f);
             DrawSourceSection();
             EditorGUILayout.Space(8f);
             DrawPathSection();
@@ -205,6 +286,23 @@ namespace Nyxara.AICompanion.Editor
             DrawOptionsSection();
             EditorGUILayout.Space(8f);
             DrawBuildSection();
+        }
+
+        private void DrawProfileTab()
+        {
+            var studioRoot = ResolveStudioRootFromContext();
+            var brain = studioRoot != null ? studioRoot.GetComponent<NyxaraCompanionBrain>() : null;
+            EnsureTestingJsonLoaded(brain);
+
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Profile Tools", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox("Use this tab for companion bio, profile JSON updates, prompt sending, and runtime JSON editing.", MessageType.Info);
+            DrawCompanionBioSection();
+            EditorGUILayout.Space(8f);
+            DrawPromptSenderSection(brain);
+            EditorGUILayout.Space(8f);
+            DrawRuntimeJsonSection(brain);
+            EditorGUILayout.EndVertical();
         }
 
         private void DrawOverviewSection()
@@ -218,6 +316,107 @@ namespace Nyxara.AICompanion.Editor
             EditorGUILayout.LabelField("Source character", _config.sourceCharacterPrefab != null ? _config.sourceCharacterPrefab.name : "Missing");
             EditorGUILayout.LabelField("Profile asset", _config.characterProfile != null ? AssetDatabase.GetAssetPath(_config.characterProfile) : "Will auto-create if enabled");
             EditorGUILayout.EndVertical();
+        }
+
+        private void DrawStatusPanel()
+        {
+            var studioRoot = ResolveStudioRootFromContext();
+            var llmAgent = studioRoot != null ? studioRoot.GetComponent<LLMAgent>() : FindFirstObjectByType<LLMAgent>();
+            var whisperInput = FindFirstObjectByType<WhisperMicrophoneInput>();
+            var ttsService = FindFirstObjectByType<PiperTtsService>();
+
+            var resolvedModelPath = ResolveModelStatusPath(_config.llmModelPath);
+            var modelFound = !string.IsNullOrWhiteSpace(resolvedModelPath) && File.Exists(resolvedModelPath);
+            var llmReady = llmAgent != null && llmAgent.llm != null && modelFound;
+            var sttReady = whisperInput != null && whisperInput.WhisperManager != null;
+            var ttsReady = ttsService != null && ttsService.IsConfigured;
+
+            var statuses = new List<StudioStatusItem>
+            {
+                new("LLM", llmReady, "Connected", "Missing", "Run Build Studio and make sure LLMUnity is installed and the local model path is valid."),
+                new("STT", sttReady, "Connected", "Missing", "Install or configure Whisper support, then rebuild the studio root."),
+                new("TTS", ttsReady, "Connected", "Missing", "Configure Piper executable + voice model, then rebuild or rescan."),
+                new("Model", modelFound, "Found", "Missing", "Put the GGUF model in StreamingAssets/Models or point the Studio Config to the correct file.")
+            };
+
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Status Panel", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox("Quick connection check after you build the studio. If something is missing, use the guidance below before moving on.", MessageType.Info);
+
+            foreach (var status in statuses)
+            {
+                DrawStatusRow(status);
+            }
+
+            var missingStatuses = statuses.Where(status => !status.IsReady).ToList();
+            if (missingStatuses.Count > 0)
+            {
+                EditorGUILayout.Space(6f);
+                foreach (var missing in missingStatuses)
+                {
+                    EditorGUILayout.HelpBox($"{missing.Label}: {missing.MissingGuidance}", MessageType.Warning);
+                }
+            }
+
+            EditorGUILayout.EndVertical();
+        }
+
+        private void DrawMicrophoneSection()
+        {
+            var whisperInput = FindFirstObjectByType<WhisperMicrophoneInput>();
+            var brain = FindFirstObjectByType<NyxaraCompanionBrain>();
+
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Voice Chat", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox("Use this in Play Mode to talk to Nyxara through the scene microphone path. Start recording, speak, then stop to transcribe and optionally auto-reply through the brain.", MessageType.Info);
+            EditorGUILayout.LabelField("Microphone Input", whisperInput != null ? whisperInput.name : "Missing in scene");
+            EditorGUILayout.LabelField("Brain", brain != null ? brain.name : "Missing in scene");
+            EditorGUILayout.LabelField("Recording", whisperInput != null && whisperInput.IsRecording ? "Active" : "Idle");
+
+            EditorGUILayout.BeginHorizontal();
+            GUI.enabled = EditorApplication.isPlaying && whisperInput != null && !whisperInput.IsRecording;
+            if (GUILayout.Button("Start Mic"))
+            {
+                Debug.Log("[Nyxara Test][Mic] Starting microphone recording.");
+                whisperInput.StartRecording();
+            }
+
+            GUI.enabled = EditorApplication.isPlaying && whisperInput != null && whisperInput.IsRecording;
+            if (GUILayout.Button("Stop Mic And Send"))
+            {
+                StopMicrophoneAndSend(whisperInput);
+            }
+
+            GUI.enabled = true;
+            EditorGUILayout.EndHorizontal();
+
+            if (!string.IsNullOrWhiteSpace(_microphoneTranscript))
+            {
+                EditorGUILayout.LabelField("Last Transcript", EditorStyles.miniBoldLabel);
+                EditorGUILayout.TextArea(_microphoneTranscript, GUILayout.MinHeight(48f));
+            }
+
+            if (!EditorApplication.isPlaying)
+            {
+                EditorGUILayout.HelpBox("Enter Play Mode to use the microphone conversation controls.", MessageType.None);
+            }
+            else if (whisperInput == null)
+            {
+                EditorGUILayout.HelpBox("No WhisperMicrophoneInput found in the scene. Build or apply the studio rig first.", MessageType.Warning);
+            }
+
+            EditorGUILayout.EndVertical();
+        }
+
+        private static void DrawStatusRow(StudioStatusItem status)
+        {
+            var icon = status.IsReady ? "OK" : "X";
+            var value = status.IsReady ? status.ReadyText : status.MissingText;
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(status.Label, GUILayout.Width(70f));
+            EditorGUILayout.LabelField(icon, GUILayout.Width(28f));
+            EditorGUILayout.LabelField(value);
+            EditorGUILayout.EndHorizontal();
         }
 
         private void DrawSourceSection()
@@ -329,6 +528,13 @@ namespace Nyxara.AICompanion.Editor
             _config.profileFolder = EditorGUILayout.TextField("Profile Folder", _config.profileFolder);
             _config.generatedFolder = EditorGUILayout.TextField("Generated Folder", _config.generatedFolder);
             _config.expressionFolder = EditorGUILayout.TextField("Expression Folder", _config.expressionFolder);
+
+            EditorGUILayout.Space(6f);
+            EditorGUILayout.LabelField("Runtime Input", EditorStyles.miniBoldLabel);
+            _config.enableRuntimeConversationOverlay = EditorGUILayout.Toggle("Enable Runtime Voice Overlay", _config.enableRuntimeConversationOverlay);
+            _config.showRuntimeConversationOverlay = EditorGUILayout.Toggle("Show Runtime Overlay", _config.showRuntimeConversationOverlay);
+            _config.runtimeMicHoldKey = (KeyCode)EditorGUILayout.EnumPopup("Mic Hold Key", _config.runtimeMicHoldKey);
+            _config.runtimePromptPopupKey = (KeyCode)EditorGUILayout.EnumPopup("Prompt Popup Key", _config.runtimePromptPopupKey);
             EditorGUILayout.EndVertical();
         }
 
@@ -466,25 +672,463 @@ namespace Nyxara.AICompanion.Editor
             DrawArkitExpressionBuilder(expressionLibrary, faceDriver);
         }
 
-        private void DrawLipSyncTab()
+        private void DrawTestingTab()
         {
             var studioRoot = ResolveStudioRootFromContext();
             SyncTabContextFromStudioRoot(studioRoot);
             var lipSyncController = studioRoot != null ? studioRoot.GetComponent<VisemeLipSyncController>() : null;
+            var brain = studioRoot != null ? studioRoot.GetComponent<NyxaraCompanionBrain>() : null;
+            var faceDriver = studioRoot != null ? studioRoot.GetComponent<ArkItBlendshapeDriver>() : null;
+            var ttsService = FindFirstObjectByType<PiperTtsService>();
+            var whisperInput = FindFirstObjectByType<WhisperMicrophoneInput>();
+            EnsureTestingAssetsLoaded();
+            EnsureTestingJsonLoaded(brain);
 
             EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField("Lip Sync Tools", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Testing Tools", EditorStyles.boldLabel);
             EditorGUILayout.LabelField("Studio Root", studioRoot != null ? studioRoot.name : "Missing");
             _expressionRenderer = (SkinnedMeshRenderer)EditorGUILayout.ObjectField("Face Renderer", _expressionRenderer, typeof(SkinnedMeshRenderer), true);
             _lipSyncData = (LipSyncData)EditorGUILayout.ObjectField("Lip Sync Data", _lipSyncData, typeof(LipSyncData), false);
             EditorGUILayout.LabelField("Lip Sync Controller", lipSyncController != null ? lipSyncController.name : "Missing in scene");
-            EditorGUILayout.HelpBox("Use this tab as the central place to check lip-sync assets and scene wiring. The dedicated lip-sync editor is still there for full viseme editing.", MessageType.Info);
+            EditorGUILayout.LabelField("Brain", brain != null ? brain.name : "Missing in scene");
+            EditorGUILayout.HelpBox("Use this tab to test imported voice playback, full Piper lip sync, live lip controls, and the full runthrough path from one place.", MessageType.Info);
+
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("TTS Test", EditorStyles.miniBoldLabel);
+            _testingVoiceClip = (AudioClip)EditorGUILayout.ObjectField("Imported Voice Clip", _testingVoiceClip, typeof(AudioClip), false);
+            GUI.enabled = EditorApplication.isPlaying && ttsService != null && _testingVoiceClip != null;
+            if (GUILayout.Button("Play Imported Voice Test"))
+            {
+                RunVoiceClipTest(ttsService);
+            }
+            GUI.enabled = true;
+
+            EditorGUILayout.Space(8f);
+            DrawLipTestingSection(faceDriver);
+
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Lip Sync Test", EditorStyles.miniBoldLabel);
+            _lipSyncTestLine = EditorGUILayout.TextField("Test Line", _lipSyncTestLine);
+
+            EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Open Detailed Lip Sync Editor"))
             {
                 LipSyncEditorWindow.ShowWindow();
             }
 
+            GUI.enabled = EditorApplication.isPlaying && ttsService != null;
+            if (GUILayout.Button("Run Lip Sync Test"))
+            {
+                RunLipSyncTest(ttsService);
+            }
+
+            GUI.enabled = true;
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(10f);
+            EditorGUILayout.LabelField("Full System Test", EditorStyles.miniBoldLabel);
+            _fullSystemTestPrompt = EditorGUILayout.TextField("Runthrough Prompt", _fullSystemTestPrompt);
+            GUI.enabled = EditorApplication.isPlaying && brain != null && !brain.IsBusy;
+            if (GUILayout.Button("Run Full System Test", GUILayout.Height(28f)))
+            {
+                RunFullSystemTest(brain, ttsService, lipSyncController, whisperInput);
+            }
+            GUI.enabled = true;
+            if (!string.IsNullOrWhiteSpace(_fullSystemTestStatus))
+            {
+                EditorGUILayout.HelpBox(_fullSystemTestStatus, MessageType.None);
+            }
+
+            if (!EditorApplication.isPlaying)
+            {
+                EditorGUILayout.HelpBox("Enter Play Mode to run the LLM test, imported voice playback, and full lip-sync test.", MessageType.None);
+            }
+            else if (ttsService == null)
+            {
+                EditorGUILayout.HelpBox("No PiperTtsService found in the active scene.", MessageType.Warning);
+            }
+
             EditorGUILayout.EndVertical();
+        }
+
+        private async void RunLipSyncTest(PiperTtsService ttsService)
+        {
+            if (ttsService == null || string.IsNullOrWhiteSpace(_lipSyncTestLine))
+            {
+                return;
+            }
+
+            try
+            {
+                Debug.Log($"[Nyxara Test][LipSync] Starting lip sync test: {_lipSyncTestLine}");
+                await ttsService.SpeakAsync(_lipSyncTestLine);
+                Debug.Log("[Nyxara Test][LipSync] Lip sync test request completed.");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+            }
+        }
+
+        private async void RunLlmTest(NyxaraCompanionBrain brain)
+        {
+            if (brain == null || string.IsNullOrWhiteSpace(_llmTestPrompt))
+            {
+                return;
+            }
+
+            _llmTestReply = "Running...";
+            Repaint();
+
+            try
+            {
+                Debug.Log($"[Nyxara Test][LLM] Sending prompt: {_llmTestPrompt}");
+                _llmTestReply = await brain.ReplyToAsync(_llmTestPrompt);
+                Debug.Log($"[Nyxara Test][LLM] Reply: {_llmTestReply}");
+            }
+            catch (Exception ex)
+            {
+                _llmTestReply = $"LLM test failed: {ex.Message}";
+                Debug.LogException(ex);
+            }
+
+            Repaint();
+        }
+
+        private void RunVoiceClipTest(PiperTtsService ttsService)
+        {
+            if (ttsService == null || _testingVoiceClip == null)
+            {
+                return;
+            }
+
+            var audioSource = ttsService.AudioSource != null ? ttsService.AudioSource : ttsService.GetComponent<AudioSource>();
+            if (audioSource == null)
+            {
+                Debug.LogWarning("No AudioSource found for the imported voice clip test.");
+                return;
+            }
+
+            audioSource.Stop();
+            audioSource.clip = _testingVoiceClip;
+            audioSource.Play();
+            Debug.Log($"[Nyxara Test][TTS] Playing imported voice clip: {_testingVoiceClip.name}");
+
+            if (ttsService.FaceDriver != null)
+            {
+                ttsService.FaceDriver.SetSpeaking(true);
+                ttsService.StartCoroutine(ttsService.FaceDriver.ReleaseSpeakingWhenSourceStops(audioSource));
+            }
+        }
+
+        private async void StopMicrophoneAndSend(WhisperMicrophoneInput whisperInput)
+        {
+            if (whisperInput == null)
+            {
+                return;
+            }
+
+            try
+            {
+                Debug.Log("[Nyxara Test][Mic] Stopping microphone recording and starting transcription.");
+                _microphoneTranscript = await whisperInput.StopRecordingAndTranscribeAsync();
+                Debug.Log($"[Nyxara Test][Mic] Transcript: {_microphoneTranscript}");
+                Repaint();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+            }
+        }
+
+        private async void RunFullSystemTest(
+            NyxaraCompanionBrain brain,
+            PiperTtsService ttsService,
+            VisemeLipSyncController lipSyncController,
+            WhisperMicrophoneInput whisperInput)
+        {
+            if (brain == null || string.IsNullOrWhiteSpace(_fullSystemTestPrompt))
+            {
+                return;
+            }
+
+            var stageMessages = new List<string>();
+            void UpdateStatus(string message)
+            {
+                stageMessages.Add(message);
+                _fullSystemTestStatus = string.Join("\n", stageMessages);
+                Debug.Log($"[Nyxara Test][Full] {message}");
+                Repaint();
+            }
+
+            UpdateStatus("Starting full system test...");
+            UpdateStatus(brain.Agent != null ? "LLM: ready" : "LLM: missing agent");
+            UpdateStatus(ttsService != null && ttsService.IsConfigured ? "TTS: ready" : "TTS: missing or not configured");
+            UpdateStatus(lipSyncController != null ? "Lip Sync: ready" : "Lip Sync: missing");
+            UpdateStatus(whisperInput != null && whisperInput.WhisperManager != null
+                ? "STT: configured for runtime"
+                : "STT: not fully configured for runtime");
+
+            if (brain.Agent == null)
+            {
+                UpdateStatus("Aborted: no LLMAgent assigned to the brain.");
+                return;
+            }
+
+            try
+            {
+                UpdateStatus("Sending prompt through NyxaraCompanionBrain...");
+                var reply = await brain.ReplyToAsync(_fullSystemTestPrompt);
+                _llmTestReply = reply;
+                UpdateStatus(string.IsNullOrWhiteSpace(reply) ? "LLM reply: empty" : $"LLM reply: {reply}");
+
+                if (ttsService == null || !ttsService.IsConfigured)
+                {
+                    UpdateStatus("TTS verification skipped because Piper is missing or not configured.");
+                    return;
+                }
+
+                UpdateStatus("Waiting for TTS/lip sync playback to begin...");
+                var playbackStarted = false;
+                var audioSource = ttsService.AudioSource != null ? ttsService.AudioSource : ttsService.GetComponent<AudioSource>();
+                for (var i = 0; i < 120; i++)
+                {
+                    if ((audioSource != null && audioSource.isPlaying) || (lipSyncController != null && lipSyncController.IsSpeaking))
+                    {
+                        playbackStarted = true;
+                        break;
+                    }
+
+                    await System.Threading.Tasks.Task.Delay(50);
+                }
+
+                UpdateStatus(playbackStarted
+                    ? "Playback: started successfully"
+                    : "Playback: did not visibly start within the expected time");
+
+                if (playbackStarted && audioSource != null)
+                {
+                    UpdateStatus("Waiting for playback to finish...");
+                    while (audioSource.isPlaying)
+                    {
+                        await System.Threading.Tasks.Task.Delay(100);
+                    }
+                    UpdateStatus("Playback: finished");
+                }
+
+                UpdateStatus("Full system test completed.");
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Full system test failed: {ex.Message}");
+                Debug.LogException(ex);
+            }
+        }
+
+        private void DrawCompanionBioSection()
+        {
+            EditorGUILayout.LabelField("Companion Bio / Profile JSON", EditorStyles.miniBoldLabel);
+            var profile = _config != null ? _config.characterProfile : null;
+            EditorGUILayout.LabelField("Profile Asset", profile != null ? AssetDatabase.GetAssetPath(profile) : "Missing");
+
+            if (profile != null)
+            {
+                profile.backgroundSummary = EditorGUILayout.TextField("Companion Bio", profile.backgroundSummary);
+                profile.speechStyle = EditorGUILayout.TextField("Speech Style", profile.speechStyle);
+                EditorUtility.SetDirty(profile);
+            }
+
+            _profileJson = EditorGUILayout.TextArea(_profileJson, GUILayout.MinHeight(120f));
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Refresh Profile JSON"))
+            {
+                RefreshProfileJson();
+            }
+
+            GUI.enabled = profile != null;
+            if (GUILayout.Button("Save Profile JSON"))
+            {
+                SaveProfileJson();
+            }
+            GUI.enabled = true;
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private void DrawPromptSenderSection(NyxaraCompanionBrain brain)
+        {
+            EditorGUILayout.LabelField("Prompt Sender", EditorStyles.miniBoldLabel);
+            _llmTestPrompt = EditorGUILayout.TextField("Prompt", _llmTestPrompt);
+            GUI.enabled = EditorApplication.isPlaying && brain != null && !brain.IsBusy;
+            if (GUILayout.Button("Run LLM Test"))
+            {
+                RunLlmTest(brain);
+            }
+
+            GUI.enabled = true;
+            if (!string.IsNullOrWhiteSpace(_llmTestReply))
+            {
+                EditorGUILayout.TextArea(_llmTestReply, GUILayout.MinHeight(60f));
+            }
+        }
+
+        private void DrawLipTestingSection(ArkItBlendshapeDriver faceDriver)
+        {
+            EditorGUILayout.LabelField("Live Lip Mixer", EditorStyles.miniBoldLabel);
+            EditorGUILayout.HelpBox("These live testing sliders are smooth, mirrored, capped, and predictable. Paired values move together unless you later choose to add asymmetry.", MessageType.None);
+            _lipResponseStart = EditorGUILayout.Slider("Response Start", _lipResponseStart, 0f, 0.95f);
+            _lipResponseEnd = EditorGUILayout.Slider("Response End", _lipResponseEnd, Mathf.Max(_lipResponseStart + 0.01f, 0.05f), 1f);
+            _lipResponseFalloff = EditorGUILayout.Slider("Response Falloff", _lipResponseFalloff, 0.25f, 3f);
+            _lipResponseSmoothing = EditorGUILayout.Slider("Response Smoothing", _lipResponseSmoothing, 1f, 25f);
+
+            foreach (var control in LipControls)
+            {
+                if (!_lipTargetValues.ContainsKey(control.Key))
+                {
+                    _lipTargetValues[control.Key] = 0f;
+                }
+
+                var currentValue = _lipTargetValues[control.Key];
+                var newValue = EditorGUILayout.Slider($"{control.Label} (max {control.Max:0.0})", currentValue, 0f, control.Max);
+                if (Math.Abs(newValue - currentValue) > 0.001f)
+                {
+                    _lipTargetValues[control.Key] = newValue;
+                    Debug.Log($"[Nyxara Test][LipMixer] {control.Label} target set to {newValue:0.0}/{control.Max:0.0}");
+                }
+            }
+
+            EditorGUILayout.BeginHorizontal();
+            GUI.enabled = faceDriver != null;
+            if (GUILayout.Button("Reset Lip Mixer"))
+            {
+                foreach (var control in LipControls)
+                {
+                    _lipTargetValues[control.Key] = 0f;
+                    foreach (var blendshape in control.Blendshapes)
+                    {
+                        faceDriver.TrySetBlendshapeWeight(blendshape, 0f);
+                        _lipAppliedValues[blendshape] = 0f;
+                    }
+                }
+
+                Debug.Log("[Nyxara Test][LipMixer] Reset all live lip mixer values.");
+            }
+
+            GUI.enabled = true;
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private void DrawRuntimeJsonSection(NyxaraCompanionBrain brain)
+        {
+            EditorGUILayout.LabelField("Runtime JSON Editor", EditorStyles.miniBoldLabel);
+            _runtimeJson = EditorGUILayout.TextArea(_runtimeJson, GUILayout.MinHeight(120f));
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Refresh Runtime JSON"))
+            {
+                RefreshRuntimeJson(brain);
+            }
+
+            GUI.enabled = brain != null && brain.RuntimeState != null;
+            if (GUILayout.Button("Apply Runtime JSON"))
+            {
+                ApplyRuntimeJson(brain);
+            }
+            GUI.enabled = true;
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private void EnsureTestingJsonLoaded(NyxaraCompanionBrain brain)
+        {
+            if (string.IsNullOrWhiteSpace(_profileJson))
+            {
+                RefreshProfileJson();
+            }
+
+            if (string.IsNullOrWhiteSpace(_runtimeJson))
+            {
+                RefreshRuntimeJson(brain);
+            }
+        }
+
+        private void RefreshProfileJson()
+        {
+            _profileJson = _config != null && _config.characterProfile != null
+                ? EditorJsonUtility.ToJson(_config.characterProfile, true)
+                : string.Empty;
+        }
+
+        private void SaveProfileJson()
+        {
+            if (_config?.characterProfile == null || string.IsNullOrWhiteSpace(_profileJson))
+            {
+                return;
+            }
+
+            try
+            {
+                EditorJsonUtility.FromJsonOverwrite(_profileJson, _config.characterProfile);
+                EditorUtility.SetDirty(_config.characterProfile);
+                AssetDatabase.SaveAssets();
+                RefreshProfileJson();
+                Debug.Log("[Nyxara Test][Profile] Profile JSON saved.");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+            }
+        }
+
+        private void RefreshRuntimeJson(NyxaraCompanionBrain brain)
+        {
+            _runtimeJson = brain != null && brain.RuntimeState != null
+                ? JsonUtility.ToJson(brain.RuntimeState, true)
+                : string.Empty;
+        }
+
+        private void ApplyRuntimeJson(NyxaraCompanionBrain brain)
+        {
+            if (brain?.RuntimeState == null || string.IsNullOrWhiteSpace(_runtimeJson))
+            {
+                return;
+            }
+
+            try
+            {
+                JsonUtility.FromJsonOverwrite(_runtimeJson, brain.RuntimeState);
+                RefreshRuntimeJson(brain);
+                Debug.Log("[Nyxara Test][Runtime] Runtime JSON applied.");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+            }
+        }
+
+        private void UpdateTestingLipPreview()
+        {
+            var studioRoot = ResolveStudioRootFromContext();
+            var faceDriver = studioRoot != null ? studioRoot.GetComponent<ArkItBlendshapeDriver>() : null;
+            if (faceDriver == null)
+            {
+                return;
+            }
+
+            const float deltaTime = 0.016f;
+            foreach (var control in LipControls)
+            {
+                var rawValue = _lipTargetValues.TryGetValue(control.Key, out var foundValue) ? foundValue : 0f;
+                var normalized = control.Max <= 0.001f ? 0f : rawValue / control.Max;
+                var t = Mathf.InverseLerp(_lipResponseStart, Mathf.Max(_lipResponseStart + 0.001f, _lipResponseEnd), normalized);
+                var shaped = Mathf.Pow(Mathf.Clamp01(t), Mathf.Max(0.01f, _lipResponseFalloff));
+                var targetWeight = shaped * control.Max;
+
+                foreach (var blendshape in control.Blendshapes)
+                {
+                    var currentWeight = _lipAppliedValues.TryGetValue(blendshape, out var current) ? current : faceDriver.GetBlendshapeWeight(blendshape);
+                    var nextWeight = Mathf.Lerp(currentWeight, targetWeight, 1f - Mathf.Exp(-_lipResponseSmoothing * deltaTime));
+                    faceDriver.TrySetBlendshapeWeight(blendshape, nextWeight);
+                    _lipAppliedValues[blendshape] = nextWeight;
+                }
+            }
         }
 
         private void DrawArkitExpressionBuilder(ExpressionLibraryManager expressionLibrary, ArkItBlendshapeDriver faceDriver)
@@ -932,10 +1576,19 @@ namespace Nyxara.AICompanion.Editor
             Repaint();
         }
 
-        private void ResetWindowState()
+        private void ResetWindowState(bool resetSelectedTab = true)
         {
-            _currentTab = StudioTab.Studio;
-            _diagnosticsTab = DiagnosticsTab.SystemScan;
+            if (resetSelectedTab)
+            {
+                _currentTab = StudioTab.Studio;
+                _diagnosticsTab = DiagnosticsTab.SystemScan;
+            }
+            else
+            {
+                _currentTab = LoadPersistedStudioTab();
+                _diagnosticsTab = LoadPersistedDiagnosticsTab();
+            }
+
             _scrollPosition = Vector2.zero;
             _lastScanReport = null;
             _logFilter = string.Empty;
@@ -947,6 +1600,16 @@ namespace Nyxara.AICompanion.Editor
             _lipSyncData = null;
             _selectedExpressionPreset = null;
             _expressionModeEnabled = false;
+            _llmTestReply = string.Empty;
+            _fullSystemTestStatus = string.Empty;
+            _microphoneTranscript = string.Empty;
+            _testingVoiceClip = LoadDefaultTestingVoiceClip();
+            _profileJson = string.Empty;
+            _runtimeJson = string.Empty;
+            _lipResponseStart = 0f;
+            _lipResponseEnd = 1f;
+            _lipResponseFalloff = 1.35f;
+            _lipResponseSmoothing = 12f;
             _builderPresetName = "New ARKit Expression";
             _builderDescription = string.Empty;
             _builderCategory = ExpressionCategory.Emotion;
@@ -954,7 +1617,27 @@ namespace Nyxara.AICompanion.Editor
             _builderBlendshapeMap.Clear();
             _builderWeights.Clear();
             _builderBlendshapeOptions.Clear();
+            _lipTargetValues.Clear();
+            _lipAppliedValues.Clear();
             _logEntries.Clear();
+        }
+
+        private void PersistWindowSelection()
+        {
+            EditorPrefs.SetInt(StudioTabPrefsKey, (int)_currentTab);
+            EditorPrefs.SetInt(DiagnosticsTabPrefsKey, (int)_diagnosticsTab);
+        }
+
+        private static StudioTab LoadPersistedStudioTab()
+        {
+            var value = EditorPrefs.GetInt(StudioTabPrefsKey, (int)StudioTab.Studio);
+            return Enum.IsDefined(typeof(StudioTab), value) ? (StudioTab)value : StudioTab.Studio;
+        }
+
+        private static DiagnosticsTab LoadPersistedDiagnosticsTab()
+        {
+            var value = EditorPrefs.GetInt(DiagnosticsTabPrefsKey, (int)DiagnosticsTab.SystemScan);
+            return Enum.IsDefined(typeof(DiagnosticsTab), value) ? (DiagnosticsTab)value : DiagnosticsTab.SystemScan;
         }
 
         private static void ResetStudioRigDefaults(AICompanionStudioConfig config)
@@ -966,6 +1649,10 @@ namespace Nyxara.AICompanion.Editor
             config.saveRootPrefab = true;
             config.createProfileIfMissing = true;
             config.autoAttachBootstrap = true;
+            config.enableRuntimeConversationOverlay = true;
+            config.showRuntimeConversationOverlay = true;
+            config.runtimeMicHoldKey = KeyCode.V;
+            config.runtimePromptPopupKey = KeyCode.T;
 
             config.characterLocalPosition = Vector3.zero;
             config.characterLocalEuler = Vector3.zero;
@@ -1031,6 +1718,19 @@ namespace Nyxara.AICompanion.Editor
             {
                 config.companionPrefabFolder = "Assets/AICompanionStudio/Companions";
             }
+        }
+
+        private void EnsureTestingAssetsLoaded()
+        {
+            if (_testingVoiceClip == null)
+            {
+                _testingVoiceClip = LoadDefaultTestingVoiceClip();
+            }
+        }
+
+        private static AudioClip LoadDefaultTestingVoiceClip()
+        {
+            return AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/AICompanion/Audio/Testing Audio/Nyxara Testing Ai Voice.wav");
         }
 
         private static List<RendererEntry> GetRendererEntries(GameObject sourcePrefab)

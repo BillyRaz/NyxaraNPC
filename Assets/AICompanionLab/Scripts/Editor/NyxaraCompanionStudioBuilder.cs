@@ -1,4 +1,5 @@
 #if UNITY_EDITOR
+using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,6 +13,7 @@ using Nyxara.AICompanion.LipSync;
 using Nyxara.AICompanion.Runtime;
 using Nyxara.AICompanion.Speech;
 using Nyxara.AICompanion.Studio;
+using Nyxara.AICompanion.UI;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -113,40 +115,12 @@ namespace Nyxara.AICompanion.Editor
             }
 
             var faceRenderer = ResolveFaceRenderer(config, characterInstance);
-            var additionalFaceRenderers = CollectAdditionalFaceRenderers(characterInstance, faceRenderer);
             if (config.createStudioEnvironment)
             {
                 CreateStudioEnvironment(config, root, characterRoot.transform, faceRenderer);
             }
 
-            AssignObjectReference(faceDriver, "targetRenderer", faceRenderer);
-            AssignObjectReference(signalRouter, "targetRenderer", faceRenderer);
-            AssignObjectReferenceList(faceDriver, "additionalRenderers", additionalFaceRenderers);
-            AssignObjectReference(tts, "faceDriver", faceDriver);
-            AssignObjectReference(tts, "lipSyncController", lipSyncController);
-            AssignObjectReference(actionGatekeeper, "actionExecutor", actionExecutor);
-            AssignObjectReference(actionExecutor, "companionTransform", root.transform);
-            AssignObjectReference(actionExecutor, "playerTransform", config.playerTransform);
-            AssignObjectReference(expressionLibrary, "targetFaceRenderer", faceRenderer);
-            AssignObjectReferenceList(expressionLibrary, "additionalFaceRenderers", additionalFaceRenderers);
-            AssignStringField(expressionLibrary, "expressionLibraryPath", config.expressionFolder);
-            AssignObjectReference(lipSyncController, "faceRenderer", faceRenderer);
-            AssignObjectReferenceList(lipSyncController, "additionalFaceRenderers", additionalFaceRenderers);
-            AssignObjectReference(lipSyncController, "phonemeExtractor", phonemeExtractor);
-            AssignObjectReference(lipSyncController, "audioSource", audioSource);
-            AssignStringField(phonemeExtractor, "piperExecutablePath", ResolveAbsoluteOrProjectPath(config.piperExecutablePath));
-            AssignStringField(phonemeExtractor, "voiceModelPath", ResolveAbsoluteOrProjectPath(config.piperVoicePath));
-
-            AssignObjectReference(brain, "agent", agent);
-            AssignObjectReference(brain, "ttsService", tts);
-            AssignObjectReference(brain, "faceDriver", faceDriver);
-            AssignObjectReference(brain, "signalRouter", signalRouter);
-            AssignObjectReference(brain, "memoryController", memoryController);
-            AssignObjectReference(brain, "actionGatekeeper", actionGatekeeper);
-            AssignObjectReference(brain, "characterProfile", profile);
-
-            AssignObjectReference(microphoneInput, "whisperManager", whisperManager);
-            AssignObjectReference(microphoneInput, "companionBrain", brain);
+            ConfigureRootSystems(config, root, characterInstance, profile);
 
             if (config.saveRootPrefab)
             {
@@ -161,7 +135,7 @@ namespace Nyxara.AICompanion.Editor
                 return root;
             }
 
-            Object.DestroyImmediate(root);
+            UnityEngine.Object.DestroyImmediate(root);
             AssetDatabase.Refresh();
             return null;
         }
@@ -174,6 +148,13 @@ namespace Nyxara.AICompanion.Editor
             }
 
             EnsureFolderStructure(config);
+            EnsureCharacterProfile(config);
+            var characterRoot = FindCharacterRoot(root.transform);
+            var characterInstance = config.sourceIsExistingRootPrefab
+                ? characterRoot?.gameObject
+                : (characterRoot != null && characterRoot.childCount > 0 ? characterRoot.GetChild(0).gameObject : null);
+            ConfigureRootSystems(config, root, characterInstance, config.characterProfile);
+
             var prefabPath = $"{config.companionPrefabFolder}/{config.characterName}_CompanionRoot.prefab";
             var prefab = PrefabUtility.SaveAsPrefabAssetAndConnect(root, prefabPath, InteractionMode.UserAction);
             AssetDatabase.SaveAssets();
@@ -207,38 +188,12 @@ namespace Nyxara.AICompanion.Editor
             }
 
             var faceRenderer = ResolveFaceRenderer(config, characterInstance != null ? characterInstance.gameObject : null);
-            var additionalFaceRenderers = CollectAdditionalFaceRenderers(characterInstance != null ? characterInstance.gameObject : null, faceRenderer);
             if (config.createStudioEnvironment)
             {
                 CreateStudioEnvironment(config, root, characterRoot, faceRenderer);
             }
 
-            var signalRouter = root.GetComponent<ExpressionSignalRouter>();
-            if (signalRouter != null)
-            {
-                AssignObjectReference(signalRouter, "targetRenderer", faceRenderer);
-            }
-
-            var faceDriver = root.GetComponent<ArkItBlendshapeDriver>();
-            if (faceDriver != null)
-            {
-                AssignObjectReference(faceDriver, "targetRenderer", faceRenderer);
-                AssignObjectReferenceList(faceDriver, "additionalRenderers", additionalFaceRenderers);
-            }
-
-            var expressionLibrary = root.GetComponent<ExpressionLibraryManager>();
-            if (expressionLibrary != null)
-            {
-                AssignObjectReference(expressionLibrary, "targetFaceRenderer", faceRenderer);
-                AssignObjectReferenceList(expressionLibrary, "additionalFaceRenderers", additionalFaceRenderers);
-            }
-
-            var lipSyncController = root.GetComponent<VisemeLipSyncController>();
-            if (lipSyncController != null)
-            {
-                AssignObjectReference(lipSyncController, "faceRenderer", faceRenderer);
-                AssignObjectReferenceList(lipSyncController, "additionalFaceRenderers", additionalFaceRenderers);
-            }
+            ConfigureRootSystems(config, root, characterInstance != null ? characterInstance.gameObject : null, config.characterProfile);
         }
 
         public static void ResetStudio(AICompanionStudioConfig config)
@@ -382,6 +337,215 @@ namespace Nyxara.AICompanion.Editor
             return likelyFaceName || hasBlendshapeOverlap;
         }
 
+        private static void ConfigureRootSystems(AICompanionStudioConfig config, GameObject root, GameObject characterInstance, CharacterProfileData profile)
+        {
+            if (config == null || root == null)
+            {
+                return;
+            }
+
+            var faceRenderer = ResolveFaceRenderer(config, characterInstance);
+            var additionalFaceRenderers = CollectAdditionalFaceRenderers(characterInstance, faceRenderer);
+
+            var tts = root.GetComponentInChildren<PiperTtsService>(true);
+            var audioSource = tts != null ? GetObjectReference<AudioSource>(tts, "audioSource") : root.GetComponentInChildren<AudioSource>(true);
+            var faceDriver = root.GetComponent<ArkItBlendshapeDriver>();
+            var signalRouter = root.GetComponent<ExpressionSignalRouter>();
+            var expressionLibrary = root.GetComponent<ExpressionLibraryManager>();
+            var lipSyncController = root.GetComponent<VisemeLipSyncController>();
+            var phonemeExtractor = root.GetComponent<PiperTTSPhonemeExtractor>();
+            var runtimeOverlay = root.GetComponent<RuntimeConversationOverlay>() ?? GetOrAddComponent<RuntimeConversationOverlay>(root);
+            var brain = root.GetComponent<NyxaraCompanionBrain>();
+            var memoryController = root.GetComponent<RecentMemoryController>();
+            var actionGatekeeper = root.GetComponent<ActionGatekeeper>();
+            var actionExecutor = root.GetComponent<CompanionActionExecutor>();
+            var agent = root.GetComponent<LLMAgent>();
+            var whisperInput = root.GetComponentInChildren<WhisperMicrophoneInput>(true);
+            var whisperManager = root.GetComponentInChildren<WhisperManager>(true);
+            var lipSyncData = EnsureLipSyncData(config);
+
+            if (faceDriver != null)
+            {
+                AssignObjectReference(faceDriver, "targetRenderer", faceRenderer);
+                AssignObjectReferenceList(faceDriver, "additionalRenderers", additionalFaceRenderers);
+            }
+
+            if (signalRouter != null)
+            {
+                AssignObjectReference(signalRouter, "targetRenderer", faceRenderer);
+            }
+
+            if (expressionLibrary != null)
+            {
+                AssignObjectReference(expressionLibrary, "targetFaceRenderer", faceRenderer);
+                AssignObjectReferenceList(expressionLibrary, "additionalFaceRenderers", additionalFaceRenderers);
+                AssignStringField(expressionLibrary, "expressionLibraryPath", config.expressionFolder);
+            }
+
+            if (lipSyncController != null)
+            {
+                AssignObjectReference(lipSyncController, "faceRenderer", faceRenderer);
+                AssignObjectReferenceList(lipSyncController, "additionalFaceRenderers", additionalFaceRenderers);
+                AssignObjectReference(lipSyncController, "lipSyncData", lipSyncData);
+                AssignObjectReference(lipSyncController, "phonemeExtractor", phonemeExtractor);
+                AssignObjectReference(lipSyncController, "audioSource", audioSource);
+                AssignFloatField(lipSyncController, "mouthOpenAmount", 0.45f);
+                AssignFloatField(lipSyncController, "visemeIntensityScale", 0.6f);
+                AssignFloatField(lipSyncController, "lowerLipDropAmount", 0.18f);
+                AssignFloatField(lipSyncController, "upperLipRaiseAmount", 0.08f);
+                AssignFloatField(lipSyncController, "mouthStretchAmount", 0.06f);
+                AssignFloatField(lipSyncController, "releaseDuration", 0.08f);
+            }
+
+            if (phonemeExtractor != null)
+            {
+                AssignStringField(phonemeExtractor, "piperExecutablePath", ResolveAbsoluteOrProjectPath(config.piperExecutablePath));
+                AssignStringField(phonemeExtractor, "voiceModelPath", ResolveAbsoluteOrProjectPath(config.piperVoicePath));
+            }
+
+            if (tts != null)
+            {
+                AssignObjectReference(tts, "faceDriver", faceDriver);
+                AssignObjectReference(tts, "lipSyncController", lipSyncController);
+                if (audioSource != null)
+                {
+                    AssignObjectReference(tts, "audioSource", audioSource);
+                }
+            }
+
+            if (actionGatekeeper != null)
+            {
+                AssignObjectReference(actionGatekeeper, "actionExecutor", actionExecutor);
+            }
+
+            if (actionExecutor != null)
+            {
+                AssignObjectReference(actionExecutor, "companionTransform", root.transform);
+                AssignObjectReference(actionExecutor, "playerTransform", config.playerTransform);
+            }
+
+            if (brain != null)
+            {
+                AssignObjectReference(brain, "agent", agent);
+                AssignObjectReference(brain, "ttsService", tts);
+                AssignObjectReference(brain, "faceDriver", faceDriver);
+                AssignObjectReference(brain, "signalRouter", signalRouter);
+                AssignObjectReference(brain, "memoryController", memoryController);
+                AssignObjectReference(brain, "actionGatekeeper", actionGatekeeper);
+                AssignObjectReference(brain, "characterProfile", profile);
+            }
+
+            if (whisperInput != null)
+            {
+                AssignObjectReference(whisperInput, "whisperManager", whisperManager);
+                AssignObjectReference(whisperInput, "companionBrain", brain);
+            }
+
+            if (runtimeOverlay != null)
+            {
+                AssignObjectReference(runtimeOverlay, "whisperInput", whisperInput);
+                AssignObjectReference(runtimeOverlay, "companionBrain", brain);
+                AssignBoolField(runtimeOverlay, "showOverlay", config.enableRuntimeConversationOverlay && config.showRuntimeConversationOverlay);
+                AssignBoolField(runtimeOverlay, "enabled", config.enableRuntimeConversationOverlay);
+                AssignEnumField(runtimeOverlay, "micHoldKey", config.runtimeMicHoldKey);
+                AssignEnumField(runtimeOverlay, "promptPopupKey", config.runtimePromptPopupKey);
+            }
+
+            if (lipSyncData != null)
+            {
+                AssignFloatField(lipSyncData, "smoothTime", 0.08f);
+                AssignFloatField(lipSyncData, "jawOpenMultiplier", 0.6f);
+            }
+
+            var studioListener = root.GetComponentInChildren<AudioListener>(true);
+            if (studioListener != null)
+            {
+                EnsureSingleAudioListener(studioListener);
+            }
+        }
+
+        private static LipSyncData EnsureLipSyncData(AICompanionStudioConfig config)
+        {
+            if (config == null)
+            {
+                return null;
+            }
+
+            var assetPath = $"{config.generatedFolder}/{config.characterName}_LipSyncData.asset";
+            var existing = AssetDatabase.LoadAssetAtPath<LipSyncData>(assetPath);
+            if (existing != null)
+            {
+                NormalizeLipSyncMappings(existing);
+                return existing;
+            }
+
+            var data = ScriptableObject.CreateInstance<LipSyncData>();
+            data.visemeMappings = new List<VisemeMapping>
+            {
+                new() { viseme = Viseme.AA, blendshapeName = "jawOpen", intensity = 27.9f, jawOpenContribution = 1f },
+                new() { viseme = Viseme.IY, blendshapeName = "mouthSmileLeft, mouthSmileRight", intensity = 40f, jawOpenContribution = 0.15f },
+                new() { viseme = Viseme.UH, blendshapeName = "mouthPucker", intensity = 80f, jawOpenContribution = 0.2f },
+                new() { viseme = Viseme.OW, blendshapeName = "mouthFunnel", intensity = 59.4f, jawOpenContribution = 0.3f },
+                new() { viseme = Viseme.EH, blendshapeName = "mouthStretchLeft, mouthStretchRight", intensity = 35f, jawOpenContribution = 0.15f },
+                new() { viseme = Viseme.FV, blendshapeName = "mouthPressLeft, mouthPressRight", intensity = 30f, jawOpenContribution = 0.05f },
+                new() { viseme = Viseme.M, blendshapeName = "mouthClose", intensity = 36.7f, jawOpenContribution = 0f },
+                new() { viseme = Viseme.sil, blendshapeName = "mouthClose", intensity = 0f, jawOpenContribution = 0f }
+            };
+            NormalizeLipSyncMappings(data);
+
+            AssetDatabase.CreateAsset(data, assetPath);
+            AssetDatabase.SaveAssets();
+            return data;
+        }
+
+        private static void NormalizeLipSyncMappings(LipSyncData data)
+        {
+            if (data == null || data.visemeMappings == null)
+            {
+                return;
+            }
+
+            foreach (var mapping in data.visemeMappings)
+            {
+                if (mapping == null)
+                {
+                    continue;
+                }
+
+                mapping.blendshapeName = mapping.viseme switch
+                {
+                    Viseme.IY when string.Equals(mapping.blendshapeName, "mouthSmileLeft") => "mouthSmileLeft, mouthSmileRight",
+                    Viseme.EH when string.Equals(mapping.blendshapeName, "mouthStretchLeft") => "mouthStretchLeft, mouthStretchRight",
+                    Viseme.FV when string.Equals(mapping.blendshapeName, "mouthPressLeft") => "mouthPressLeft, mouthPressRight",
+                    _ => mapping.blendshapeName
+                };
+
+                switch (mapping.viseme)
+                {
+                    case Viseme.AA:
+                        mapping.intensity = 27.9f;
+                        break;
+                    case Viseme.IY:
+                        mapping.intensity = 40f;
+                        break;
+                    case Viseme.UH:
+                        mapping.intensity = 80f;
+                        break;
+                    case Viseme.OW:
+                        mapping.intensity = 59.4f;
+                        break;
+                    case Viseme.EH:
+                        mapping.intensity = 35f;
+                        break;
+                    case Viseme.M:
+                        mapping.intensity = 36.7f;
+                        break;
+                }
+            }
+
+            EditorUtility.SetDirty(data);
+        }
+
         private static GameObject CreateRootFromSource(AICompanionStudioConfig config, out Transform characterRoot, out GameObject characterInstance)
         {
             characterRoot = null;
@@ -392,7 +556,7 @@ namespace Nyxara.AICompanion.Editor
                 var instantiatedRoot = PrefabUtility.InstantiatePrefab(config.sourceCharacterPrefab) as GameObject;
                 if (instantiatedRoot == null)
                 {
-                    instantiatedRoot = Object.Instantiate(config.sourceCharacterPrefab);
+                    instantiatedRoot = UnityEngine.Object.Instantiate(config.sourceCharacterPrefab);
                 }
 
                 Undo.RegisterCreatedObjectUndo(instantiatedRoot, "Create AI Companion Studio Root");
@@ -415,7 +579,7 @@ namespace Nyxara.AICompanion.Editor
                 characterInstance = PrefabUtility.InstantiatePrefab(config.sourceCharacterPrefab) as GameObject;
                 if (characterInstance == null)
                 {
-                    characterInstance = Object.Instantiate(config.sourceCharacterPrefab);
+                    characterInstance = UnityEngine.Object.Instantiate(config.sourceCharacterPrefab);
                 }
 
                 Undo.RegisterCreatedObjectUndo(characterInstance, "Instantiate Source Character");
@@ -486,7 +650,12 @@ namespace Nyxara.AICompanion.Editor
             cameraObject.transform.position = focusTarget.position + (direction * config.cameraDistance) + (Vector3.up * (config.cameraHeight - focusTarget.position.y));
             cameraObject.transform.LookAt(focusTarget.position);
 
-            var camera = Undo.AddComponent<Camera>(cameraObject);
+            var camera = cameraObject.GetComponent<Camera>();
+            if (camera == null)
+            {
+                camera = Undo.AddComponent<Camera>(cameraObject);
+            }
+
             camera.clearFlags = CameraClearFlags.SolidColor;
             camera.backgroundColor = config.studioBackgroundColor;
             camera.fieldOfView = config.cameraFieldOfView;
@@ -496,15 +665,55 @@ namespace Nyxara.AICompanion.Editor
             camera.allowMSAA = true;
             camera.depthTextureMode = DepthTextureMode.Depth;
 
-            var listener = Undo.AddComponent<AudioListener>(cameraObject);
-            listener.enabled = true;
+            var listener = cameraObject.GetComponent<AudioListener>();
+            if (listener == null)
+            {
+                listener = Undo.AddComponent<AudioListener>(cameraObject);
+            }
 
-            var additionalCameraData = Undo.AddComponent<UniversalAdditionalCameraData>(cameraObject);
+            listener.enabled = true;
+            EnsureSingleAudioListener(listener);
+
+            var additionalCameraData = cameraObject.GetComponent<UniversalAdditionalCameraData>();
+            if (additionalCameraData == null)
+            {
+                additionalCameraData = Undo.AddComponent<UniversalAdditionalCameraData>(cameraObject);
+            }
+
             additionalCameraData.renderPostProcessing = true;
             additionalCameraData.antialiasing = AntialiasingMode.SubpixelMorphologicalAntiAliasing;
             additionalCameraData.antialiasingQuality = AntialiasingQuality.High;
             additionalCameraData.stopNaN = true;
             additionalCameraData.dithering = true;
+        }
+
+        private static void EnsureSingleAudioListener(AudioListener preferredListener)
+        {
+            if (preferredListener == null)
+            {
+                return;
+            }
+
+            preferredListener.enabled = true;
+            var listeners = UnityEngine.Object.FindObjectsByType<AudioListener>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            foreach (var listener in listeners)
+            {
+                if (listener == null || listener == preferredListener)
+                {
+                    continue;
+                }
+
+                if (!listener.enabled)
+                {
+                    continue;
+                }
+
+                Undo.RecordObject(listener, "Disable Extra Audio Listener");
+                listener.enabled = false;
+                EditorUtility.SetDirty(listener);
+            }
+
+            EditorUtility.SetDirty(preferredListener);
         }
 
         private static void CreateStudioLights(AICompanionStudioConfig config, Transform studioRig, Transform focusTarget)
@@ -637,7 +846,7 @@ namespace Nyxara.AICompanion.Editor
             AssetDatabase.CreateFolder(parent, child);
         }
 
-        private static void AssignObjectReference(Object target, string fieldName, Object value)
+        private static void AssignObjectReference(UnityEngine.Object target, string fieldName, UnityEngine.Object value)
         {
             var serializedObject = new SerializedObject(target);
             var property = serializedObject.FindProperty(fieldName);
@@ -650,7 +859,19 @@ namespace Nyxara.AICompanion.Editor
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
         }
 
-        private static void AssignObjectReferenceList(Object target, string fieldName, IReadOnlyList<SkinnedMeshRenderer> values)
+        private static T GetObjectReference<T>(UnityEngine.Object source, string fieldName) where T : UnityEngine.Object
+        {
+            if (source == null)
+            {
+                return null;
+            }
+
+            var serializedObject = new SerializedObject(source);
+            var property = serializedObject.FindProperty(fieldName);
+            return property != null ? property.objectReferenceValue as T : null;
+        }
+
+        private static void AssignObjectReferenceList(UnityEngine.Object target, string fieldName, IReadOnlyList<SkinnedMeshRenderer> values)
         {
             var serializedObject = new SerializedObject(target);
             var property = serializedObject.FindProperty(fieldName);
@@ -671,7 +892,7 @@ namespace Nyxara.AICompanion.Editor
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
         }
 
-        private static void AssignStringField(Object target, string fieldName, string value)
+        private static void AssignStringField(UnityEngine.Object target, string fieldName, string value)
         {
             var serializedObject = new SerializedObject(target);
             var property = serializedObject.FindProperty(fieldName);
@@ -681,6 +902,45 @@ namespace Nyxara.AICompanion.Editor
             }
 
             property.stringValue = value;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        private static void AssignFloatField(UnityEngine.Object target, string fieldName, float value)
+        {
+            var serializedObject = new SerializedObject(target);
+            var property = serializedObject.FindProperty(fieldName);
+            if (property == null)
+            {
+                return;
+            }
+
+            property.floatValue = value;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        private static void AssignBoolField(UnityEngine.Object target, string fieldName, bool value)
+        {
+            var serializedObject = new SerializedObject(target);
+            var property = serializedObject.FindProperty(fieldName);
+            if (property == null)
+            {
+                return;
+            }
+
+            property.boolValue = value;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+        }
+
+        private static void AssignEnumField(UnityEngine.Object target, string fieldName, Enum value)
+        {
+            var serializedObject = new SerializedObject(target);
+            var property = serializedObject.FindProperty(fieldName);
+            if (property == null)
+            {
+                return;
+            }
+
+            property.intValue = Convert.ToInt32(value);
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
         }
     }

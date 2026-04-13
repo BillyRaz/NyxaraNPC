@@ -30,6 +30,10 @@ MonoBehaviour:
   createStudioEnvironment: 1
   createStudioCamera: 1
   createStudioLights: 1
+  enableRuntimeConversationOverlay: 1
+  showRuntimeConversationOverlay: 1
+  runtimeMicHoldKey: 118
+  runtimePromptPopupKey: 116
   characterLocalPosition: {x: 0, y: 0, z: 0}
   characterLocalEuler: {x: 0, y: 0, z: 0}
   focusHeightOffset: 1.55
