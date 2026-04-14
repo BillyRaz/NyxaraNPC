@@ -16,7 +16,7 @@ namespace Nyxara.AICompanion.Editor
         private Dictionary<int, float> _targetPreviewWeights = new();
         private double _lastPreviewUpdateTime;
 
-        [MenuItem("Nyxara AI/Studio/Lip Sync Editor")]
+        [MenuItem("Nyxara AI/Editors/Lip Sync Editor", false, 21)]
         public static void ShowWindow()
         {
             var window = GetWindow<LipSyncEditorWindow>("Nyxara AI Lip Sync Editor");

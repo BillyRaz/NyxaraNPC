@@ -24,6 +24,12 @@ namespace Nyxara.AICompanion.Editor
         private const string LegacyDefaultConfigPath = "Assets/AICompanionStudio/Generated/AICompanionStudioConfig.asset";
         private const string StudioTabPrefsKey = "NyxaraStudio.CurrentTab";
         private const string DiagnosticsTabPrefsKey = "NyxaraStudio.DiagnosticsTab";
+        private const string LipResponseStartPrefsKey = "NyxaraStudio.LipResponseStart";
+        private const string LipResponseEndPrefsKey = "NyxaraStudio.LipResponseEnd";
+        private const string LipResponseFalloffPrefsKey = "NyxaraStudio.LipResponseFalloff";
+        private const string LipResponseSmoothingPrefsKey = "NyxaraStudio.LipResponseSmoothing";
+        private const string LipSliderStartPrefsPrefix = "NyxaraStudio.LipSliderStart.";
+        private const string LipSliderEndPrefsPrefix = "NyxaraStudio.LipSliderEnd.";
         private const string LmStudioGemmaModelPath = @"C:\Users\Connect2Aryans\.lmstudio\models\Chun121\gemma-3-4b-it-GGUF\gemma-3-4b-it-Q4_K_M.gguf";
         private const string ProjectGemmaModelRelativePath = "Models/gemma-3-4b-it-Q4_K_M.gguf";
 
@@ -145,7 +151,7 @@ namespace Nyxara.AICompanion.Editor
             new("mouth_shrug_pair", "Shrug Lower/Upper", 50f, "mouthShrugLower", "mouthShrugUpper")
         };
 
-        [MenuItem("Nyxara AI/Studio")]
+        [MenuItem("Nyxara AI/Studio", false, 1)]
         public static void ShowWindow()
         {
             var window = GetWindow<NyxaraCompanionStudioWindow>("Nyxara AI Studio");
@@ -158,6 +164,7 @@ namespace Nyxara.AICompanion.Editor
             _config = LoadOrCreateConfig();
             ApplyDefaultPathsIfEmpty(_config);
             ResetWindowState(false);
+            LoadPersistedLipMixerSettings();
             Application.logMessageReceived += OnLogMessageReceived;
             EditorApplication.update += OnEditorUpdate;
             FindRuntimeMonitor();
@@ -165,6 +172,7 @@ namespace Nyxara.AICompanion.Editor
 
         private void OnDisable()
         {
+            PersistLipMixerSettings();
             Application.logMessageReceived -= OnLogMessageReceived;
             EditorApplication.update -= OnEditorUpdate;
         }
@@ -1248,10 +1256,15 @@ namespace Nyxara.AICompanion.Editor
         {
             EditorGUILayout.LabelField("Live Lip Mixer", EditorStyles.miniBoldLabel);
             EditorGUILayout.HelpBox("These live testing sliders are smooth, mirrored, capped, and predictable. You can now widen each mouth control's working start/end range here while still keeping zero available to fully relax the face.", MessageType.None);
-            _lipResponseStart = EditorGUILayout.Slider("Response Start", _lipResponseStart, 0f, 0.95f);
-            _lipResponseEnd = EditorGUILayout.Slider("Response End", _lipResponseEnd, Mathf.Max(_lipResponseStart + 0.01f, 0.05f), 1f);
-            _lipResponseFalloff = EditorGUILayout.Slider("Response Falloff", _lipResponseFalloff, 0.25f, 3f);
-            _lipResponseSmoothing = EditorGUILayout.Slider("Response Smoothing", _lipResponseSmoothing, 1f, 25f);
+            var settingsChanged = false;
+            var responseStart = EditorGUILayout.Slider("Response Start", _lipResponseStart, 0f, 0.95f);
+            var responseEnd = EditorGUILayout.Slider("Response End", _lipResponseEnd, Mathf.Max(responseStart + 0.01f, 0.05f), 1f);
+            var responseFalloff = EditorGUILayout.Slider("Response Falloff", _lipResponseFalloff, 0.25f, 3f);
+            var responseSmoothing = EditorGUILayout.Slider("Response Smoothing", _lipResponseSmoothing, 1f, 25f);
+            settingsChanged |= ApplyIfChanged(ref _lipResponseStart, responseStart);
+            settingsChanged |= ApplyIfChanged(ref _lipResponseEnd, responseEnd);
+            settingsChanged |= ApplyIfChanged(ref _lipResponseFalloff, responseFalloff);
+            settingsChanged |= ApplyIfChanged(ref _lipResponseSmoothing, responseSmoothing);
 
             foreach (var control in LipControls)
             {
@@ -1280,8 +1293,7 @@ namespace Nyxara.AICompanion.Editor
                 EditorGUILayout.EndHorizontal();
                 rangeStart = Mathf.Clamp(rangeStart, 0f, 100f);
                 rangeEnd = Mathf.Clamp(Mathf.Max(rangeStart + 0.1f, rangeEnd), 0.1f, 100f);
-                _lipSliderStartValues[control.Key] = rangeStart;
-                _lipSliderEndValues[control.Key] = rangeEnd;
+                settingsChanged |= ApplyLipSliderRange(control.Key, rangeStart, rangeEnd);
 
                 var currentValue = _lipTargetValues[control.Key];
                 var sliderMax = Mathf.Max(0.1f, rangeEnd);
@@ -1323,11 +1335,17 @@ namespace Nyxara.AICompanion.Editor
                     _lipSliderEndValues[control.Key] = control.Max;
                 }
 
+                PersistLipMixerSettings();
                 Debug.Log("[Nyxara Test][LipMixer] Reset all lip mixer ranges to their defaults.");
             }
 
             GUI.enabled = true;
             EditorGUILayout.EndHorizontal();
+
+            if (settingsChanged)
+            {
+                PersistLipMixerSettings();
+            }
         }
 
         private void DrawLipSyncRuntimeSettings(VisemeLipSyncController lipSyncController)
@@ -2027,6 +2045,65 @@ namespace Nyxara.AICompanion.Editor
         {
             EditorPrefs.SetInt(StudioTabPrefsKey, (int)_currentTab);
             EditorPrefs.SetInt(DiagnosticsTabPrefsKey, (int)_diagnosticsTab);
+        }
+
+        private void PersistLipMixerSettings()
+        {
+            EditorPrefs.SetFloat(LipResponseStartPrefsKey, _lipResponseStart);
+            EditorPrefs.SetFloat(LipResponseEndPrefsKey, _lipResponseEnd);
+            EditorPrefs.SetFloat(LipResponseFalloffPrefsKey, _lipResponseFalloff);
+            EditorPrefs.SetFloat(LipResponseSmoothingPrefsKey, _lipResponseSmoothing);
+
+            foreach (var control in LipControls)
+            {
+                var startValue = _lipSliderStartValues.TryGetValue(control.Key, out var storedStart) ? storedStart : 0f;
+                var endValue = _lipSliderEndValues.TryGetValue(control.Key, out var storedEnd) ? storedEnd : control.Max;
+                EditorPrefs.SetFloat($"{LipSliderStartPrefsPrefix}{control.Key}", startValue);
+                EditorPrefs.SetFloat($"{LipSliderEndPrefsPrefix}{control.Key}", endValue);
+            }
+        }
+
+        private void LoadPersistedLipMixerSettings()
+        {
+            _lipResponseStart = EditorPrefs.GetFloat(LipResponseStartPrefsKey, _lipResponseStart);
+            _lipResponseEnd = EditorPrefs.GetFloat(LipResponseEndPrefsKey, _lipResponseEnd);
+            _lipResponseFalloff = EditorPrefs.GetFloat(LipResponseFalloffPrefsKey, _lipResponseFalloff);
+            _lipResponseSmoothing = EditorPrefs.GetFloat(LipResponseSmoothingPrefsKey, _lipResponseSmoothing);
+
+            foreach (var control in LipControls)
+            {
+                _lipSliderStartValues[control.Key] = EditorPrefs.GetFloat($"{LipSliderStartPrefsPrefix}{control.Key}", 0f);
+                _lipSliderEndValues[control.Key] = EditorPrefs.GetFloat($"{LipSliderEndPrefsPrefix}{control.Key}", control.Max);
+            }
+        }
+
+        private bool ApplyLipSliderRange(string controlKey, float startValue, float endValue)
+        {
+            var changed = false;
+            if (!_lipSliderStartValues.TryGetValue(controlKey, out var currentStart) || Math.Abs(currentStart - startValue) > 0.001f)
+            {
+                _lipSliderStartValues[controlKey] = startValue;
+                changed = true;
+            }
+
+            if (!_lipSliderEndValues.TryGetValue(controlKey, out var currentEnd) || Math.Abs(currentEnd - endValue) > 0.001f)
+            {
+                _lipSliderEndValues[controlKey] = endValue;
+                changed = true;
+            }
+
+            return changed;
+        }
+
+        private static bool ApplyIfChanged(ref float field, float nextValue)
+        {
+            if (Math.Abs(field - nextValue) <= 0.001f)
+            {
+                return false;
+            }
+
+            field = nextValue;
+            return true;
         }
 
         private static StudioTab LoadPersistedStudioTab()

@@ -61,7 +61,7 @@ namespace Nyxara.AICompanion.Core
         }
 
 #if UNITY_EDITOR
-        [MenuItem("Nyxara/AI Companion/Setup Full Companion")]
+        [MenuItem("Nyxara AI/Legacy/Setup Full Companion", false, 200)]
         public static void CreateFullCompanion()
         {
             var go = new GameObject("NyxaraCompanion");

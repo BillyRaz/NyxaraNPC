@@ -46,7 +46,7 @@ namespace Nyxara.AICompanion.Editor
         private readonly Dictionary<string, float> _signalWeightMap = new();
         private readonly List<string> _availableSignals = new() { "smile", "eyebrow_raise", "head_tilt", "suspicious_look", "shy_smile", "amused_smirk", "concerned", "bold_stare" };
 
-        [MenuItem("Nyxara AI/Studio/Expression Editor")]
+        [MenuItem("Nyxara AI/Editors/Expression Editor", false, 20)]
         public static void ShowWindow()
         {
             var window = GetWindow<ExpressionEditorWindow>("Nyxara AI Expression Editor");
