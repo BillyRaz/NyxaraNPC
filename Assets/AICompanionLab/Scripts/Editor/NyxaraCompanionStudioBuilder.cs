@@ -26,12 +26,12 @@ namespace Nyxara.AICompanion.Editor
     {
         public static void EnsureFolderStructure(AICompanionStudioConfig config)
         {
-            EnsureFolder("Assets", "AICompanionStudio");
-            EnsureFolder(config.rootFolder, "Prefabs");
-            EnsureFolder(config.rootFolder, "Companions");
-            EnsureFolder(config.rootFolder, "Profiles");
-            EnsureFolder(config.rootFolder, "Generated");
-            EnsureFolder(config.rootFolder, "Expressions");
+            EnsureAssetFolderPath(string.IsNullOrWhiteSpace(config.rootFolder) ? "Assets/NyxaraAIStudio" : config.rootFolder);
+            EnsureAssetFolderPath(config.prefabFolder);
+            EnsureAssetFolderPath(config.companionPrefabFolder);
+            EnsureAssetFolderPath(config.profileFolder);
+            EnsureAssetFolderPath(config.generatedFolder);
+            EnsureAssetFolderPath(config.expressionFolder);
             AssetDatabase.Refresh();
         }
 
@@ -122,6 +122,7 @@ namespace Nyxara.AICompanion.Editor
                 GetOrAddComponent<CompanionBootstrap>(root);
             }
 
+            RefreshPreferredFaceRendererPath(config, characterInstance);
             var faceRenderer = ResolveFaceRenderer(config, characterInstance);
             if (config.createStudioEnvironment)
             {
@@ -196,6 +197,7 @@ namespace Nyxara.AICompanion.Editor
                 Undo.DestroyObjectImmediate(studioRig.gameObject);
             }
 
+            RefreshPreferredFaceRendererPath(config, characterInstance != null ? characterInstance.gameObject : null);
             var faceRenderer = ResolveFaceRenderer(config, characterInstance != null ? characterInstance.gameObject : null);
             if (config.createStudioEnvironment)
             {
@@ -277,7 +279,103 @@ namespace Nyxara.AICompanion.Editor
                 return null;
             }
 
-            return characterInstance.GetComponentInChildren<SkinnedMeshRenderer>();
+            var renderers = characterInstance.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+            if (renderers == null || renderers.Length == 0)
+            {
+                return null;
+            }
+
+            return renderers
+                .OrderByDescending(ScoreFaceRenderer)
+                .ThenBy(renderer => renderer.transform.GetSiblingIndex())
+                .FirstOrDefault();
+        }
+
+        private static int ScoreFaceRenderer(SkinnedMeshRenderer renderer)
+        {
+            if (renderer == null || renderer.sharedMesh == null)
+            {
+                return int.MinValue;
+            }
+
+            var score = 0;
+            var rendererName = renderer.name.ToLowerInvariant();
+            var meshName = renderer.sharedMesh.name.ToLowerInvariant();
+
+            if (rendererName.Contains("head") || meshName.Contains("head"))
+            {
+                score += 50;
+            }
+
+            if (rendererName.Contains("face") || meshName.Contains("face"))
+            {
+                score += 30;
+            }
+
+            if (rendererName.Contains("lash") || meshName.Contains("lash"))
+            {
+                score -= 40;
+            }
+
+            if (rendererName.Contains("hair") || meshName.Contains("hair"))
+            {
+                score -= 60;
+            }
+
+            if (rendererName.Contains("body") || meshName.Contains("body"))
+            {
+                score -= 50;
+            }
+
+            var mesh = renderer.sharedMesh;
+            for (var i = 0; i < mesh.blendShapeCount; i++)
+            {
+                var blendshapeName = mesh.GetBlendShapeName(i).ToLowerInvariant();
+                if (blendshapeName.Contains("jaw"))
+                {
+                    score += 20;
+                }
+
+                if (blendshapeName.Contains("mouth") || blendshapeName.Contains("lip"))
+                {
+                    score += 12;
+                }
+
+                if (blendshapeName.Contains("tongue"))
+                {
+                    score += 8;
+                }
+
+                if (blendshapeName.Contains("eye") || blendshapeName.Contains("brow"))
+                {
+                    score += 4;
+                }
+            }
+
+            return score;
+        }
+
+        private static void RefreshPreferredFaceRendererPath(AICompanionStudioConfig config, GameObject characterInstance)
+        {
+            if (config == null || characterInstance == null)
+            {
+                return;
+            }
+
+            var resolvedRenderer = ResolveFaceRenderer(config, characterInstance);
+            if (resolvedRenderer == null)
+            {
+                return;
+            }
+
+            var relativePath = GetRelativePath(resolvedRenderer.transform, characterInstance.transform);
+            if (string.Equals(config.preferredFaceRendererPath, relativePath, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            config.preferredFaceRendererPath = relativePath;
+            EditorUtility.SetDirty(config);
         }
 
         private static List<SkinnedMeshRenderer> CollectAdditionalFaceRenderers(GameObject characterInstance, SkinnedMeshRenderer primaryRenderer)
@@ -347,6 +445,25 @@ namespace Nyxara.AICompanion.Editor
             return likelyFaceName || hasBlendshapeOverlap;
         }
 
+        private static string GetRelativePath(Transform current, Transform root)
+        {
+            if (current == null || root == null || current == root)
+            {
+                return string.Empty;
+            }
+
+            var names = new List<string>();
+            var cursor = current;
+            while (cursor != null && cursor != root)
+            {
+                names.Add(cursor.name);
+                cursor = cursor.parent;
+            }
+
+            names.Reverse();
+            return string.Join("/", names);
+        }
+
         private static void ConfigureRootSystems(AICompanionStudioConfig config, GameObject root, GameObject characterInstance, CharacterProfileData profile)
         {
             if (config == null || root == null)
@@ -377,6 +494,7 @@ namespace Nyxara.AICompanion.Editor
 
             if (llm != null)
             {
+                llm.model = ResolveModelPathForLlm(config);
                 AssignIntField(llm, "_contextSize", config.llmContextSize);
                 AssignIntField(llm, "_numThreads", config.llmNumThreads);
                 AssignIntField(llm, "_numGPULayers", 0);
@@ -399,18 +517,21 @@ namespace Nyxara.AICompanion.Editor
             {
                 AssignObjectReference(faceDriver, "targetRenderer", faceRenderer);
                 AssignObjectReferenceList(faceDriver, "additionalRenderers", additionalFaceRenderers);
+                AssignBoolField(faceDriver, "expressionModeActive", false);
             }
 
             if (signalRouter != null)
             {
                 AssignObjectReference(signalRouter, "targetRenderer", faceRenderer);
+                AssignBoolField(signalRouter, "expressionModeActive", false);
             }
 
             if (expressionLibrary != null)
             {
                 AssignObjectReference(expressionLibrary, "targetFaceRenderer", faceRenderer);
                 AssignObjectReferenceList(expressionLibrary, "additionalFaceRenderers", additionalFaceRenderers);
-                AssignStringField(expressionLibrary, "expressionLibraryPath", config.expressionFolder);
+                AssignStringField(expressionLibrary, "expressionLibraryPath", ResolveExpressionLibraryPath(config, faceRenderer, additionalFaceRenderers));
+                AssignBoolField(expressionLibrary, "expressionModeActive", false);
             }
 
             if (lipSyncController != null)
@@ -420,6 +541,7 @@ namespace Nyxara.AICompanion.Editor
                 AssignObjectReference(lipSyncController, "lipSyncData", lipSyncData);
                 AssignObjectReference(lipSyncController, "phonemeExtractor", phonemeExtractor);
                 AssignObjectReference(lipSyncController, "audioSource", audioSource);
+                AssignBoolField(lipSyncController, "expressionModeActive", false);
                 AssignFloatField(lipSyncController, "mouthOpenAmount", 0.45f);
                 AssignFloatField(lipSyncController, "visemeIntensityScale", 0.6f);
                 AssignFloatField(lipSyncController, "lowerLipDropAmount", 0.18f);
@@ -434,8 +556,17 @@ namespace Nyxara.AICompanion.Editor
                 AssignStringField(phonemeExtractor, "voiceModelPath", ResolveAbsoluteOrProjectPath(config.piperVoicePath));
             }
 
+            if (whisperManager != null)
+            {
+                whisperManager.ModelPath = config.whisperModelRelativePath;
+                whisperManager.IsModelPathInStreamingAssets = true;
+                EditorUtility.SetDirty(whisperManager);
+            }
+
             if (tts != null)
             {
+                tts.PiperExecutablePath = ResolveAbsoluteOrProjectPath(config.piperExecutablePath);
+                tts.VoiceModelPath = ResolveAbsoluteOrProjectPath(config.piperVoicePath);
                 AssignObjectReference(tts, "faceDriver", faceDriver);
                 AssignObjectReference(tts, "lipSyncController", lipSyncController);
                 if (audioSource != null)
@@ -491,6 +622,10 @@ namespace Nyxara.AICompanion.Editor
             {
                 AssignFloatField(lipSyncData, "smoothTime", 0.08f);
                 AssignFloatField(lipSyncData, "jawOpenMultiplier", 0.6f);
+                AssignFloatField(lipSyncData, "responseStart", 0f);
+                AssignFloatField(lipSyncData, "responseEnd", 1f);
+                AssignFloatField(lipSyncData, "responseFalloff", 1.35f);
+                AssignFloatField(lipSyncData, "responseSmoothing", 12f);
             }
 
             var studioListener = root.GetComponentInChildren<AudioListener>(true);
@@ -535,6 +670,11 @@ namespace Nyxara.AICompanion.Editor
             AssetDatabase.CreateAsset(data, assetPath);
             AssetDatabase.SaveAssets();
             return data;
+        }
+
+        public static LipSyncData EnsureLipSyncDataForEditor(AICompanionStudioConfig config)
+        {
+            return EnsureLipSyncData(config);
         }
 
         private static void NormalizeLipSyncMappings(LipSyncData data)
@@ -622,12 +762,29 @@ namespace Nyxara.AICompanion.Editor
                 }
 
                 Undo.RegisterCreatedObjectUndo(characterInstance, "Instantiate Source Character");
+                DetachSourceInstanceFromImportedPrefab(characterInstance);
                 characterInstance.name = config.sourceCharacterPrefab.name;
                 Undo.SetTransformParent(characterInstance.transform, characterRoot, "Parent Source Character");
                 ApplyCharacterTransform(config, characterInstance.transform);
             }
 
             return root;
+        }
+
+        private static void DetachSourceInstanceFromImportedPrefab(GameObject instance)
+        {
+            if (instance == null || !PrefabUtility.IsPartOfAnyPrefab(instance))
+            {
+                return;
+            }
+
+            var assetType = PrefabUtility.GetPrefabAssetType(instance);
+            if (assetType != PrefabAssetType.Model && assetType != PrefabAssetType.Regular && assetType != PrefabAssetType.Variant)
+            {
+                return;
+            }
+
+            PrefabUtility.UnpackPrefabInstance(instance, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
         }
 
         private static Transform FindCharacterRoot(Transform root)
@@ -851,13 +1008,92 @@ namespace Nyxara.AICompanion.Editor
 
         private static string ResolveModelPathForLlm(AICompanionStudioConfig config)
         {
+            var configuredPath = ResolveAbsoluteOrProjectPath(config.llmModelPath);
+            if (!string.IsNullOrWhiteSpace(configuredPath) && File.Exists(configuredPath))
+            {
+                var configuredFileName = Path.GetFileName(configuredPath);
+                if (TryGetStreamingAssetsModelRelativePath(configuredFileName, out var copiedRelativePath))
+                {
+                    return copiedRelativePath;
+                }
+
+                return configuredPath;
+            }
+
+            var configuredNameOnly = Path.GetFileName(config.llmModelPath ?? string.Empty);
+            if (TryGetStreamingAssetsModelRelativePath(configuredNameOnly, out var configuredRelativePath))
+            {
+                return configuredRelativePath;
+            }
+
             var streamingAssetsModel = Path.Combine(Application.streamingAssetsPath, "Models", CompanionStackDefaults.QwenModelFileName);
             if (File.Exists(streamingAssetsModel))
             {
                 return Path.Combine("Models", CompanionStackDefaults.QwenModelFileName).Replace('\\', '/');
             }
 
-            return ResolveAbsoluteOrProjectPath(config.llmModelPath);
+            return configuredPath;
+        }
+
+        private static bool TryGetStreamingAssetsModelRelativePath(string modelFileName, out string relativePath)
+        {
+            relativePath = null;
+            if (string.IsNullOrWhiteSpace(modelFileName))
+            {
+                return false;
+            }
+
+            var modelPath = Path.Combine(Application.streamingAssetsPath, "Models", modelFileName);
+            if (!File.Exists(modelPath))
+            {
+                return false;
+            }
+
+            relativePath = Path.Combine("Models", modelFileName).Replace('\\', '/');
+            return true;
+        }
+
+        public static string ResolveExpressionLibraryPath(
+            AICompanionStudioConfig config,
+            SkinnedMeshRenderer faceRenderer,
+            IEnumerable<SkinnedMeshRenderer> additionalFaceRenderers)
+        {
+            var baseFolder = string.IsNullOrWhiteSpace(config?.expressionFolder)
+                ? "Assets/NyxaraAIStudio/Expressions"
+                : config.expressionFolder;
+            var profile = DetectPrimaryFaceProfile(faceRenderer, additionalFaceRenderers);
+            var characterSegment = SanitizePathSegment(config?.characterName, "Character");
+            var profileSegment = SanitizePathSegment(profile, "Custom_Unknown");
+            return $"{baseFolder}/{characterSegment}/{profileSegment}";
+        }
+
+        public static string DetectPrimaryFaceProfile(
+            SkinnedMeshRenderer faceRenderer,
+            IEnumerable<SkinnedMeshRenderer> additionalFaceRenderers)
+        {
+            var renderers = new List<SkinnedMeshRenderer>();
+            if (faceRenderer != null)
+            {
+                renderers.Add(faceRenderer);
+            }
+
+            if (additionalFaceRenderers != null)
+            {
+                renderers.AddRange(additionalFaceRenderers.Where(renderer => renderer != null && !renderers.Contains(renderer)));
+            }
+
+            var blendshapeNames = ExpressionBuilderHelper.GetBlendshapeNames(renderers);
+            var profiles = ExpressionBuilderHelper.DetectCompatibilityProfiles(blendshapeNames);
+            return profiles.FirstOrDefault(profile => !string.Equals(profile, "Custom/Unknown", StringComparison.OrdinalIgnoreCase))
+                   ?? profiles.FirstOrDefault()
+                   ?? "Custom/Unknown";
+        }
+
+        private static string SanitizePathSegment(string value, string fallback)
+        {
+            var chosen = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+            var invalidChars = Path.GetInvalidFileNameChars();
+            return new string(chosen.Select(ch => invalidChars.Contains(ch) || ch == '/' || ch == '\\' ? '_' : ch).ToArray());
         }
 
         private static void RemoveExistingStudioRoot(string rootName)
@@ -883,6 +1119,33 @@ namespace Nyxara.AICompanion.Editor
             }
 
             AssetDatabase.CreateFolder(parent, child);
+        }
+
+        private static void EnsureAssetFolderPath(string assetPath)
+        {
+            if (string.IsNullOrWhiteSpace(assetPath) || AssetDatabase.IsValidFolder(assetPath))
+            {
+                return;
+            }
+
+            var normalizedPath = assetPath.Replace('\\', '/').Trim('/');
+            var segments = normalizedPath.Split('/');
+            if (segments.Length == 0 || !string.Equals(segments[0], "Assets", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var current = segments[0];
+            for (var i = 1; i < segments.Length; i++)
+            {
+                var next = $"{current}/{segments[i]}";
+                if (!AssetDatabase.IsValidFolder(next))
+                {
+                    AssetDatabase.CreateFolder(current, segments[i]);
+                }
+
+                current = next;
+            }
         }
 
         private static void AssignObjectReference(UnityEngine.Object target, string fieldName, UnityEngine.Object value)

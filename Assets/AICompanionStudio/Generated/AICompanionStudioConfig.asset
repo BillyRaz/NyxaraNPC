@@ -12,14 +12,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6422ddd939edcea47b1cb19ad196b857, type: 3}
   m_Name: AICompanionStudioConfig
   m_EditorClassIdentifier: Assembly-CSharp::Nyxara.AICompanion.Studio.AICompanionStudioConfig
-  characterName: Nyxara
-  studioRootName: NyxaraStudioRoot
+  characterName: NyxaraCompanion
+  studioRootName: NyxaraCompanionStudioRoot
   sourceCharacterPrefab: {fileID: 919132149155446097, guid: 4fde7f8b033e0a44a95e3f2282bb68ea, type: 3}
   sourceIsExistingRootPrefab: 0
-  preferredFaceRendererPath: Nyxara.Shape
+  preferredFaceRendererPath: Nyxara Head.Shape
   playerTransform: {fileID: 0}
   characterProfile: {fileID: 11400000, guid: 14fcbed700aa31a448dfec3da0cc4852, type: 2}
-  llmModelPath: Models/Qwen2.5-7B-Instruct-1M-Q4_K_M.gguf
+  llmModelPath: Models/gemma-3-4b-it-Q4_K_M.gguf
   whisperModelRelativePath: Speech/ggml-tiny.bin
   piperExecutablePath: C:\Users\Connect2Aryans\Downloads\piper_windows_amd64\piper\piper.exe
   piperVoicePath: D:/Unity Project/NyxaraNPC/Assets\StreamingAssets\Speech\PiperVoices\en_US-amy-medium.onnx
@@ -34,9 +34,9 @@ MonoBehaviour:
   showRuntimeConversationOverlay: 1
   runtimeMicHoldKey: 118
   runtimePromptPopupKey: 116
-  llmContextSize: 2048
+  llmContextSize: 4096
   llmNumThreads: -1
-  llmNumPredict: 48
+  llmNumPredict: 96
   llmCachePrompt: 1
   llmTemperature: 0.2
   llmTopP: 0.85

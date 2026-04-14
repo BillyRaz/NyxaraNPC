@@ -7,6 +7,38 @@ namespace Nyxara.AICompanion.Face
 {
     public class ArkItBlendshapeDriver : MonoBehaviour
     {
+        private static readonly Dictionary<string, string[]> BlendshapeAliases = new(System.StringComparer.OrdinalIgnoreCase)
+        {
+            ["jawOpen"] = new[] { "jawOpen", "JawOpen", "Jaw_Open", "V_Open", "V_Lip_Open", "V_Dental_Lip", "Mouth_Drop_Lower", "Mouth_Drop_Upper", "viseme_aa", "viseme_AA", "A" },
+            ["jawForward"] = new[] { "jawForward", "JawForward", "Jaw_Forward" },
+            ["jawLeft"] = new[] { "jawLeft", "JawLeft", "Jaw_L" },
+            ["jawRight"] = new[] { "jawRight", "JawRight", "Jaw_R" },
+            ["mouthClose"] = new[] { "mouthClose", "MouthClose", "Mouth_Close", "viseme_sil", "viseme_PP", "viseme_pp" },
+            ["mouthFunnel"] = new[] { "mouthFunnel", "MouthFunnel", "Mouth_Funnel_Up_L", "Mouth_Funnel_Up_R", "Mouth_Funnel_Down_L", "Mouth_Funnel_Down_R", "O", "viseme_O" },
+            ["mouthPucker"] = new[] { "mouthPucker", "MouthPucker", "Mouth_Pucker_Up_L", "Mouth_Pucker_Up_R", "Mouth_Pucker_Down_L", "Mouth_Pucker_Down_R", "U", "viseme_U", "viseme_ou" },
+            ["mouthLeft"] = new[] { "mouthLeft", "MouthLeft", "Mouth_L" },
+            ["mouthRight"] = new[] { "mouthRight", "MouthRight", "Mouth_R" },
+            ["mouthSmileLeft"] = new[] { "mouthSmileLeft", "mouthSmile_L", "SmileLeft", "Mouth_Smile_L", "Mouth_Smile_Sharp_L" },
+            ["mouthSmileRight"] = new[] { "mouthSmileRight", "mouthSmile_R", "SmileRight", "Mouth_Smile_R", "Mouth_Smile_Sharp_R" },
+            ["mouthFrownLeft"] = new[] { "mouthFrownLeft", "mouthFrown_L", "FrownLeft", "Mouth_Frown_L" },
+            ["mouthFrownRight"] = new[] { "mouthFrownRight", "mouthFrown_R", "FrownRight", "Mouth_Frown_R" },
+            ["mouthStretchLeft"] = new[] { "mouthStretchLeft", "mouthStretch_L", "StretchLeft", "Mouth_Stretch_L", "viseme_I", "viseme_E" },
+            ["mouthStretchRight"] = new[] { "mouthStretchRight", "mouthStretch_R", "StretchRight", "Mouth_Stretch_R", "viseme_I", "viseme_E" },
+            ["mouthPressLeft"] = new[] { "mouthPressLeft", "mouthPress_L", "MouthPressLeft", "Mouth_Press_L" },
+            ["mouthPressRight"] = new[] { "mouthPressRight", "mouthPress_R", "MouthPressRight", "Mouth_Press_R" },
+            ["mouthDimpleLeft"] = new[] { "mouthDimpleLeft", "mouthDimple_L", "DimpleLeft", "Mouth_Dimple_L" },
+            ["mouthDimpleRight"] = new[] { "mouthDimpleRight", "mouthDimple_R", "DimpleRight", "Mouth_Dimple_R" },
+            ["mouthLowerDownLeft"] = new[] { "mouthLowerDownLeft", "mouthLowerDown_L", "MouthLowerDownLeft", "Mouth_Down_Lower_L", "Mouth_Drop_Lower", "V_Lip_Open" },
+            ["mouthLowerDownRight"] = new[] { "mouthLowerDownRight", "mouthLowerDown_R", "MouthLowerDownRight", "Mouth_Down_Lower_R", "Mouth_Drop_Lower", "V_Lip_Open" },
+            ["mouthUpperUpLeft"] = new[] { "mouthUpperUpLeft", "mouthUpperUp_L", "MouthUpperUpLeft", "Mouth_Up_Upper_L", "Mouth_Drop_Upper", "V_Dental_Lip" },
+            ["mouthUpperUpRight"] = new[] { "mouthUpperUpRight", "mouthUpperUp_R", "MouthUpperUpRight", "Mouth_Up_Upper_R", "Mouth_Drop_Upper", "V_Dental_Lip" },
+            ["mouthRollUpper"] = new[] { "mouthRollUpper", "MouthRollUpper", "Mouth_Roll_In_Upper_L", "Mouth_Roll_In_Upper_R", "Mouth_Roll_Out_Upper_L", "Mouth_Roll_Out_Upper_R" },
+            ["mouthRollLower"] = new[] { "mouthRollLower", "MouthRollLower", "Mouth_Roll_In_Lower_L", "Mouth_Roll_In_Lower_R", "Mouth_Roll_Out_Lower_L", "Mouth_Roll_Out_Lower_R" },
+            ["mouthShrugUpper"] = new[] { "mouthShrugUpper", "MouthShrugUpper", "Mouth_Shrug_Upper" },
+            ["mouthShrugLower"] = new[] { "mouthShrugLower", "MouthShrugLower", "Mouth_Shrug_Lower" },
+            ["tongueOut"] = new[] { "tongueOut", "TongueOut", "Tongue_Out", "V_Tongue_Out" }
+        };
+
         [SerializeField] private SkinnedMeshRenderer targetRenderer;
         [SerializeField] private List<SkinnedMeshRenderer> additionalRenderers = new();
         [SerializeField] private string jawOpenBlendshape = "jawOpen";
@@ -17,6 +49,7 @@ namespace Nyxara.AICompanion.Face
         [SerializeField] private bool expressionModeActive;
 
         public SkinnedMeshRenderer TargetRenderer => targetRenderer;
+        public IReadOnlyList<SkinnedMeshRenderer> AdditionalRenderers => additionalRenderers;
         public IReadOnlyList<SkinnedMeshRenderer> TargetRenderers => GetAllRenderers();
 
         public void SetSpeaking(bool active)
@@ -54,10 +87,13 @@ namespace Nyxara.AICompanion.Face
                     continue;
                 }
 
-                var index = renderer.sharedMesh.GetBlendShapeIndex(blendshapeName);
-                if (index >= 0)
+                foreach (var candidate in GetBlendshapeCandidates(blendshapeName))
                 {
-                    renderer.SetBlendShapeWeight(index, weight);
+                    var index = renderer.sharedMesh.GetBlendShapeIndex(candidate);
+                    if (index >= 0)
+                    {
+                        renderer.SetBlendShapeWeight(index, weight);
+                    }
                 }
             }
         }
@@ -77,14 +113,17 @@ namespace Nyxara.AICompanion.Face
                     continue;
                 }
 
-                var index = renderer.sharedMesh.GetBlendShapeIndex(blendshapeName);
-                if (index < 0)
+                foreach (var candidate in GetBlendshapeCandidates(blendshapeName))
                 {
-                    continue;
-                }
+                    var index = renderer.sharedMesh.GetBlendShapeIndex(candidate);
+                    if (index < 0)
+                    {
+                        continue;
+                    }
 
-                renderer.SetBlendShapeWeight(index, weight);
-                applied = true;
+                    renderer.SetBlendShapeWeight(index, weight);
+                    applied = true;
+                }
             }
 
             return applied;
@@ -105,10 +144,13 @@ namespace Nyxara.AICompanion.Face
                     continue;
                 }
 
-                var index = renderer.sharedMesh.GetBlendShapeIndex(blendshapeName);
-                if (index >= 0)
+                foreach (var candidate in GetBlendshapeCandidates(blendshapeName))
                 {
-                    weight = Mathf.Max(weight, renderer.GetBlendShapeWeight(index));
+                    var index = renderer.sharedMesh.GetBlendShapeIndex(candidate);
+                    if (index >= 0)
+                    {
+                        weight = Mathf.Max(weight, renderer.GetBlendShapeWeight(index));
+                    }
                 }
             }
 
@@ -125,7 +167,7 @@ namespace Nyxara.AICompanion.Face
             return GetAllRenderers()
                 .Any(renderer => renderer != null &&
                                  renderer.sharedMesh != null &&
-                                 renderer.sharedMesh.GetBlendShapeIndex(blendshapeName) >= 0);
+                                 GetBlendshapeCandidates(blendshapeName).Any(candidate => renderer.sharedMesh.GetBlendShapeIndex(candidate) >= 0));
         }
 
         public List<string> GetBlendshapeNames()
@@ -191,6 +233,26 @@ namespace Nyxara.AICompanion.Face
             }
 
             return renderers;
+        }
+
+        public static IReadOnlyList<string> ResolveBlendshapeCandidates(string blendshapeName)
+        {
+            if (string.IsNullOrWhiteSpace(blendshapeName))
+            {
+                return System.Array.Empty<string>();
+            }
+
+            if (BlendshapeAliases.TryGetValue(blendshapeName, out var aliases) && aliases != null && aliases.Length > 0)
+            {
+                return aliases;
+            }
+
+            return new[] { blendshapeName };
+        }
+
+        private static IEnumerable<string> GetBlendshapeCandidates(string blendshapeName)
+        {
+            return ResolveBlendshapeCandidates(blendshapeName);
         }
     }
 }

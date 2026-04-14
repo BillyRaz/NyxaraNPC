@@ -14,7 +14,7 @@ namespace Nyxara.AICompanion.Editor
 {
     public static class CompanionSceneSetup
     {
-        [MenuItem("Nyxara/AI Companion/Create Bootstrap Objects")]
+        [MenuItem("Nyxara AI/Legacy/Create Bootstrap Objects")]
         public static void CreateBootstrapObjects()
         {
             var root = FindOrCreate("Nyxara Companion");

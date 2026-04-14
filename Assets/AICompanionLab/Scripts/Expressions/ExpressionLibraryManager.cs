@@ -11,7 +11,7 @@ namespace Nyxara.AICompanion.Expressions
 {
     public class ExpressionLibraryManager : MonoBehaviour
     {
-        [SerializeField] private string expressionLibraryPath = "Assets/AICompanionStudio/Expressions";
+        [SerializeField] private string expressionLibraryPath = "Assets/NyxaraAIStudio/Expressions";
         [SerializeField] private SkinnedMeshRenderer targetFaceRenderer;
         [SerializeField] private List<SkinnedMeshRenderer> additionalFaceRenderers = new();
         [SerializeField] private bool expressionModeActive;
@@ -25,6 +25,7 @@ namespace Nyxara.AICompanion.Expressions
         public IReadOnlyList<ExpressionPreset> LoadedPresets => _loadedPresets;
         public IReadOnlyList<SkinnedMeshRenderer> TargetFaceRenderers => GetAllFaceRenderers();
         public bool ExpressionModeActive => expressionModeActive;
+        public string ExpressionLibraryPath => expressionLibraryPath;
 
         private void Awake()
         {
@@ -37,17 +38,20 @@ namespace Nyxara.AICompanion.Expressions
             _presetLookup.Clear();
 
 #if UNITY_EDITOR
-            var guids = AssetDatabase.FindAssets("t:ExpressionPreset", new[] { expressionLibraryPath });
-            foreach (var guid in guids)
+            if (!string.IsNullOrWhiteSpace(expressionLibraryPath) && AssetDatabase.IsValidFolder(expressionLibraryPath))
             {
-                var path = AssetDatabase.GUIDToAssetPath(guid);
-                var preset = AssetDatabase.LoadAssetAtPath<ExpressionPreset>(path);
-                if (preset != null)
+                var guids = AssetDatabase.FindAssets("t:ExpressionPreset", new[] { expressionLibraryPath });
+                foreach (var guid in guids)
                 {
-                    _loadedPresets.Add(preset);
-                    if (!string.IsNullOrWhiteSpace(preset.presetId))
+                    var path = AssetDatabase.GUIDToAssetPath(guid);
+                    var preset = AssetDatabase.LoadAssetAtPath<ExpressionPreset>(path);
+                    if (preset != null)
                     {
-                        _presetLookup[preset.presetId] = preset;
+                        _loadedPresets.Add(preset);
+                        if (!string.IsNullOrWhiteSpace(preset.presetId))
+                        {
+                            _presetLookup[preset.presetId] = preset;
+                        }
                     }
                 }
             }
@@ -182,6 +186,20 @@ namespace Nyxara.AICompanion.Expressions
         public void SetExpressionMode(bool active)
         {
             expressionModeActive = active;
+        }
+
+        public void SetExpressionLibraryPath(string libraryPath, bool reload = true)
+        {
+            if (string.IsNullOrWhiteSpace(libraryPath))
+            {
+                return;
+            }
+
+            expressionLibraryPath = libraryPath;
+            if (reload)
+            {
+                LoadAllPresets();
+            }
         }
 
 #if UNITY_EDITOR

@@ -16,10 +16,10 @@ namespace Nyxara.AICompanion.Editor
         private Dictionary<int, float> _targetPreviewWeights = new();
         private double _lastPreviewUpdateTime;
 
-        [MenuItem("Nyxara/AI Companion/Lip Sync Editor")]
+        [MenuItem("Nyxara AI/Studio/Lip Sync Editor")]
         public static void ShowWindow()
         {
-            var window = GetWindow<LipSyncEditorWindow>("Lip Sync Editor");
+            var window = GetWindow<LipSyncEditorWindow>("Nyxara AI Lip Sync Editor");
             window.minSize = new Vector2(760, 640);
             window.Show();
         }
@@ -93,6 +93,10 @@ namespace Nyxara.AICompanion.Editor
             EditorGUILayout.LabelField("Animation Settings", EditorStyles.boldLabel);
             _lipSyncData.smoothTime = EditorGUILayout.Slider("Smooth Time", _lipSyncData.smoothTime, 0.01f, 0.3f);
             _lipSyncData.jawOpenMultiplier = EditorGUILayout.Slider("Jaw Open Multiplier", _lipSyncData.jawOpenMultiplier, 0f, 1f);
+            _lipSyncData.responseStart = EditorGUILayout.Slider("Response Start", _lipSyncData.responseStart, 0f, 0.95f);
+            _lipSyncData.responseEnd = EditorGUILayout.Slider("Response End", _lipSyncData.responseEnd, Mathf.Max(_lipSyncData.responseStart + 0.01f, 0.05f), 1f);
+            _lipSyncData.responseFalloff = EditorGUILayout.Slider("Response Falloff", _lipSyncData.responseFalloff, 0.25f, 3f);
+            _lipSyncData.responseSmoothing = EditorGUILayout.Slider("Response Smoothing", _lipSyncData.responseSmoothing, 1f, 25f);
 
             EditorGUILayout.Space(10);
             EditorGUILayout.LabelField("Test", EditorStyles.boldLabel);

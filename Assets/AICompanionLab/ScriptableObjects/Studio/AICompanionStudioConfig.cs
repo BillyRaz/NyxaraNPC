@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace Nyxara.AICompanion.Studio
 {
-    [CreateAssetMenu(fileName = "AICompanionStudioConfig", menuName = "AI Companion/Studio Config")]
+    [CreateAssetMenu(fileName = "NyxaraAIStudioConfig", menuName = "Nyxara AI/Studio Config")]
     public class AICompanionStudioConfig : ScriptableObject
     {
         [Header("Identity")]
@@ -69,11 +69,11 @@ namespace Nyxara.AICompanion.Studio
         public Color studioBackgroundColor = new Color(0.18f, 0.18f, 0.2f, 1f);
 
         [Header("Output Paths")]
-        public string rootFolder = "Assets/AICompanionStudio";
-        public string prefabFolder = "Assets/AICompanionStudio/Prefabs";
-        public string companionPrefabFolder = "Assets/AICompanionStudio/Companions";
-        public string profileFolder = "Assets/AICompanionStudio/Profiles";
-        public string generatedFolder = "Assets/AICompanionStudio/Generated";
-        public string expressionFolder = "Assets/AICompanionStudio/Expressions";
+        public string rootFolder = "Assets/NyxaraAIStudio";
+        public string prefabFolder = "Assets/NyxaraAIStudio/Prefabs";
+        public string companionPrefabFolder = "Assets/NyxaraAIStudio/Companions";
+        public string profileFolder = "Assets/NyxaraAIStudio/Profiles";
+        public string generatedFolder = "Assets/NyxaraAIStudio/Generated";
+        public string expressionFolder = "Assets/NyxaraAIStudio/Expressions";
     }
 }

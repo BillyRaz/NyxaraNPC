@@ -44,10 +44,10 @@ namespace Nyxara.AICompanion.Editor
         private bool _isPlaying;
         private double _lastUpdateTime;
 
-        [MenuItem("Nyxara/AI Companion/Diagnostics")]
+        [MenuItem("Nyxara AI/Diagnostics")]
         public static void ShowWindow()
         {
-            var window = GetWindow<DiagnosticsWindow>("AI Diagnostics");
+            var window = GetWindow<DiagnosticsWindow>("Nyxara AI Diagnostics");
             window.minSize = new Vector2(720f, 540f);
             window.Show();
         }

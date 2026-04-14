@@ -17,41 +17,108 @@ namespace Nyxara.AICompanion.Expressions
 
         private static readonly List<ControlDefinition> DefaultControls = new()
         {
-            Create("browInnerUp", "Brow Inner Up", "browInnerUp", "BrowInnerUp"),
-            Create("browDownLeft", "Brow Down Left", "browDownLeft", "BrowDownLeft"),
-            Create("browDownRight", "Brow Down Right", "browDownRight", "BrowDownRight"),
-            Create("eyeBlinkLeft", "Eye Blink Left", "eyeBlinkLeft", "EyeBlinkLeft"),
-            Create("eyeBlinkRight", "Eye Blink Right", "eyeBlinkRight", "EyeBlinkRight"),
-            Create("eyeSquintLeft", "Eye Squint Left", "eyeSquintLeft", "EyeSquintLeft"),
-            Create("eyeSquintRight", "Eye Squint Right", "eyeSquintRight", "EyeSquintRight"),
-            Create("eyeWideLeft", "Eye Wide Left", "eyeWideLeft", "EyeWideLeft"),
-            Create("eyeWideRight", "Eye Wide Right", "eyeWideRight", "EyeWideRight"),
-            Create("cheekPuff", "Cheek Puff", "cheekPuff", "CheekPuff"),
-            Create("cheekSquintLeft", "Cheek Squint Left", "cheekSquintLeft", "CheekSquintLeft"),
-            Create("cheekSquintRight", "Cheek Squint Right", "cheekSquintRight", "CheekSquintRight"),
-            Create("noseSneerLeft", "Nose Sneer Left", "noseSneerLeft", "NoseSneerLeft"),
-            Create("noseSneerRight", "Nose Sneer Right", "noseSneerRight", "NoseSneerRight"),
-            Create("jawOpen", "Jaw Open", "jawOpen", "JawOpen", "mouthOpen"),
-            Create("mouthClose", "Mouth Close", "mouthClose", "MouthClose"),
-            Create("mouthFunnel", "Mouth Funnel", "mouthFunnel", "MouthFunnel"),
-            Create("mouthPucker", "Mouth Pucker", "mouthPucker", "MouthPucker"),
-            Create("mouthSmileLeft", "Smile Left", "mouthSmileLeft", "mouthSmile_L", "SmileLeft"),
-            Create("mouthSmileRight", "Smile Right", "mouthSmileRight", "mouthSmile_R", "SmileRight"),
-            Create("mouthFrownLeft", "Frown Left", "mouthFrownLeft", "mouthFrown_L", "FrownLeft"),
-            Create("mouthFrownRight", "Frown Right", "mouthFrownRight", "mouthFrown_R", "FrownRight"),
-            Create("mouthDimpleLeft", "Dimple Left", "mouthDimpleLeft", "mouthDimple_L", "DimpleLeft"),
-            Create("mouthDimpleRight", "Dimple Right", "mouthDimpleRight", "mouthDimple_R", "DimpleRight"),
-            Create("mouthStretchLeft", "Mouth Stretch Left", "mouthStretchLeft", "mouthStretch_L", "StretchLeft"),
-            Create("mouthStretchRight", "Mouth Stretch Right", "mouthStretchRight", "mouthStretch_R", "StretchRight"),
-            Create("mouthRollUpper", "Roll Upper Lip", "mouthRollUpper", "MouthRollUpper"),
-            Create("mouthRollLower", "Roll Lower Lip", "mouthRollLower", "MouthRollLower"),
-            Create("mouthShrugUpper", "Shrug Upper Lip", "mouthShrugUpper", "MouthShrugUpper"),
-            Create("mouthShrugLower", "Shrug Lower Lip", "mouthShrugLower", "MouthShrugLower")
+            Create("browInnerUp", "Brow Inner Up", "browInnerUp", "BrowInnerUp", "Brow_Raise_Inner_L", "Brow_Raise_Inner_R"),
+            Create("browDownLeft", "Brow Down Left", "browDownLeft", "BrowDownLeft", "Brow_Drop_L"),
+            Create("browDownRight", "Brow Down Right", "browDownRight", "BrowDownRight", "Brow_Drop_R"),
+            Create("eyeBlinkLeft", "Eye Blink Left", "eyeBlinkLeft", "EyeBlinkLeft", "Eye_Blink_L", "Blink_L"),
+            Create("eyeBlinkRight", "Eye Blink Right", "eyeBlinkRight", "EyeBlinkRight", "Eye_Blink_R", "Blink_R"),
+            Create("eyeSquintLeft", "Eye Squint Left", "eyeSquintLeft", "EyeSquintLeft", "Eye_Squint_L"),
+            Create("eyeSquintRight", "Eye Squint Right", "eyeSquintRight", "EyeSquintRight", "Eye_Squint_R"),
+            Create("eyeWideLeft", "Eye Wide Left", "eyeWideLeft", "EyeWideLeft", "Eye_Wide_L"),
+            Create("eyeWideRight", "Eye Wide Right", "eyeWideRight", "EyeWideRight", "Eye_Wide_R"),
+            Create("cheekPuff", "Cheek Puff", "cheekPuff", "CheekPuff", "Cheek_Puff_L", "Cheek_Puff_R"),
+            Create("cheekSquintLeft", "Cheek Squint Left", "cheekSquintLeft", "CheekSquintLeft", "Cheek_Raise_L"),
+            Create("cheekSquintRight", "Cheek Squint Right", "cheekSquintRight", "CheekSquintRight", "Cheek_Raise_R"),
+            Create("noseSneerLeft", "Nose Sneer Left", "noseSneerLeft", "NoseSneerLeft", "Nose_Sneer_L"),
+            Create("noseSneerRight", "Nose Sneer Right", "noseSneerRight", "NoseSneerRight", "Nose_Sneer_R"),
+            Create("jawOpen", "Jaw Open", "jawOpen", "JawOpen", "mouthOpen", "Jaw_Open", "V_Open", "viseme_aa", "viseme_AA", "A"),
+            Create("jawForward", "Jaw Forward", "jawForward", "JawForward", "Jaw_Forward"),
+            Create("jawLeft", "Jaw Left", "jawLeft", "JawLeft", "Jaw_L"),
+            Create("jawRight", "Jaw Right", "jawRight", "JawRight", "Jaw_R"),
+            Create("mouthClose", "Mouth Close", "mouthClose", "MouthClose", "Mouth_Close", "viseme_sil", "viseme_PP", "viseme_pp"),
+            Create("mouthFunnel", "Mouth Funnel", "mouthFunnel", "MouthFunnel", "Mouth_Funnel_Up_L", "Mouth_Funnel_Up_R", "Mouth_Funnel_Down_L", "Mouth_Funnel_Down_R", "O", "viseme_O"),
+            Create("mouthPucker", "Mouth Pucker", "mouthPucker", "MouthPucker", "Mouth_Pucker_Up_L", "Mouth_Pucker_Up_R", "Mouth_Pucker_Down_L", "Mouth_Pucker_Down_R", "U", "viseme_U", "viseme_ou"),
+            Create("mouthLeft", "Mouth Left", "mouthLeft", "MouthLeft", "Mouth_L"),
+            Create("mouthRight", "Mouth Right", "mouthRight", "MouthRight", "Mouth_R"),
+            Create("mouthSmileLeft", "Smile Left", "mouthSmileLeft", "mouthSmile_L", "SmileLeft", "Mouth_Smile_L", "Mouth_Smile_Sharp_L"),
+            Create("mouthSmileRight", "Smile Right", "mouthSmileRight", "mouthSmile_R", "SmileRight", "Mouth_Smile_R", "Mouth_Smile_Sharp_R"),
+            Create("mouthFrownLeft", "Frown Left", "mouthFrownLeft", "mouthFrown_L", "FrownLeft", "Mouth_Frown_L"),
+            Create("mouthFrownRight", "Frown Right", "mouthFrownRight", "mouthFrown_R", "FrownRight", "Mouth_Frown_R"),
+            Create("mouthDimpleLeft", "Dimple Left", "mouthDimpleLeft", "mouthDimple_L", "DimpleLeft", "Mouth_Dimple_L"),
+            Create("mouthDimpleRight", "Dimple Right", "mouthDimpleRight", "mouthDimple_R", "DimpleRight", "Mouth_Dimple_R"),
+            Create("mouthStretchLeft", "Mouth Stretch Left", "mouthStretchLeft", "mouthStretch_L", "StretchLeft", "Mouth_Stretch_L", "viseme_I", "viseme_E"),
+            Create("mouthStretchRight", "Mouth Stretch Right", "mouthStretchRight", "mouthStretch_R", "StretchRight", "Mouth_Stretch_R", "viseme_I", "viseme_E"),
+            Create("mouthPressLeft", "Mouth Press Left", "mouthPressLeft", "mouthPress_L", "MouthPressLeft", "Mouth_Press_L"),
+            Create("mouthPressRight", "Mouth Press Right", "mouthPressRight", "mouthPress_R", "MouthPressRight", "Mouth_Press_R"),
+            Create("mouthLowerDownLeft", "Lower Down Left", "mouthLowerDownLeft", "mouthLowerDown_L", "MouthLowerDownLeft", "Mouth_Down_Lower_L"),
+            Create("mouthLowerDownRight", "Lower Down Right", "mouthLowerDownRight", "mouthLowerDown_R", "MouthLowerDownRight", "Mouth_Down_Lower_R"),
+            Create("mouthUpperUpLeft", "Upper Up Left", "mouthUpperUpLeft", "mouthUpperUp_L", "MouthUpperUpLeft", "Mouth_Up_Upper_L"),
+            Create("mouthUpperUpRight", "Upper Up Right", "mouthUpperUpRight", "mouthUpperUp_R", "MouthUpperUpRight", "Mouth_Up_Upper_R"),
+            Create("mouthRollUpper", "Roll Upper Lip", "mouthRollUpper", "MouthRollUpper", "Mouth_Roll_In_Upper_L", "Mouth_Roll_In_Upper_R", "Mouth_Roll_Out_Upper_L", "Mouth_Roll_Out_Upper_R"),
+            Create("mouthRollLower", "Roll Lower Lip", "mouthRollLower", "MouthRollLower", "Mouth_Roll_In_Lower_L", "Mouth_Roll_In_Lower_R", "Mouth_Roll_Out_Lower_L", "Mouth_Roll_Out_Lower_R"),
+            Create("mouthShrugUpper", "Shrug Upper Lip", "mouthShrugUpper", "MouthShrugUpper", "Mouth_Shrug_Upper"),
+            Create("mouthShrugLower", "Shrug Lower Lip", "mouthShrugLower", "MouthShrugLower", "Mouth_Shrug_Lower"),
+            Create("tongueOut", "Tongue Out", "tongueOut", "TongueOut", "Tongue_Out", "V_Tongue_Out")
         };
 
         public static IReadOnlyList<ControlDefinition> GetDefaultControls()
         {
             return DefaultControls;
+        }
+
+        public static IReadOnlyList<string> DetectCompatibilityProfiles(IEnumerable<string> blendshapeNames)
+        {
+            var normalized = new HashSet<string>((blendshapeNames ?? Array.Empty<string>()).Select(Normalize), StringComparer.OrdinalIgnoreCase);
+            var profiles = new List<string>();
+
+            if (normalized.Contains("jawopen") && normalized.Contains("mouthsmileleft") && normalized.Contains("eyeblinkleft"))
+            {
+                profiles.Add("ARKit");
+            }
+
+            if (normalized.Contains("jawopen") && normalized.Contains("mouthsmilel") && normalized.Contains("mouthclose"))
+            {
+                profiles.Add("CC/Reallusion");
+            }
+
+            if (normalized.Contains("vopen") || normalized.Contains("visemeaa") || normalized.Contains("visemeo") || normalized.Contains("visemeu"))
+            {
+                profiles.Add("Viseme/VTuber");
+            }
+
+            if (normalized.Contains("metahuman") || (normalized.Contains("jawopen") && normalized.Contains("browraiseouterl") && normalized.Contains("eyeblinkleft")))
+            {
+                profiles.Add("Unreal/MetaHuman-like");
+            }
+
+            if (profiles.Count == 0)
+            {
+                profiles.Add("Custom/Unknown");
+            }
+
+            return profiles;
+        }
+
+        public static bool LooksLikeRecognizedControlName(string blendshapeName)
+        {
+            if (string.IsNullOrWhiteSpace(blendshapeName))
+            {
+                return false;
+            }
+
+            var normalizedName = Normalize(blendshapeName);
+            foreach (var control in DefaultControls)
+            {
+                foreach (var candidate in control.candidateBlendshapeNames ?? Array.Empty<string>())
+                {
+                    if (string.Equals(normalizedName, Normalize(candidate), StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         public static List<string> GetBlendshapeNames(SkinnedMeshRenderer renderer)

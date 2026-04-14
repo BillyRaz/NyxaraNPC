@@ -1,7 +1,9 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Nyxara.AICompanion.Face;
 using UnityEngine;
 
 namespace Nyxara.AICompanion.LipSync
@@ -25,6 +27,18 @@ namespace Nyxara.AICompanion.LipSync
         [SerializeField] private float releaseDuration = 0.08f;
 
         private Coroutine _lipSyncCoroutine;
+        private readonly Dictionary<string, float> _appliedBlendshapeWeights = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _trackedBlendshapeNames = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly string[] JawHelperBlendshapeNames =
+        {
+            "jawOpen",
+            "mouthLowerDownLeft",
+            "mouthLowerDownRight",
+            "mouthUpperUpLeft",
+            "mouthUpperUpRight",
+            "mouthStretchLeft",
+            "mouthStretchRight"
+        };
 
         public bool IsSpeaking { get; private set; }
 
@@ -35,14 +49,35 @@ namespace Nyxara.AICompanion.LipSync
 
         private void CacheBlendshapeIndices()
         {
-            if (GetAllRenderers().Count == 0 || lipSyncData == null)
+            _trackedBlendshapeNames.Clear();
+            if (lipSyncData == null)
             {
                 return;
+            }
+
+            foreach (var mapping in lipSyncData.visemeMappings)
+            {
+                if (mapping == null)
+                {
+                    continue;
+                }
+
+                foreach (var blendshapeName in mapping.EnumerateBlendshapeNames())
+                {
+                    _trackedBlendshapeNames.Add(blendshapeName);
+                }
+            }
+
+            foreach (var blendshapeName in JawHelperBlendshapeNames)
+            {
+                _trackedBlendshapeNames.Add(blendshapeName);
             }
         }
 
         public async Task SpeakWithLipSync(string text, float clipDuration = -1f)
         {
+            CacheBlendshapeIndices();
+
             if (expressionModeActive)
             {
                 StopLipSync();
@@ -95,7 +130,7 @@ namespace Nyxara.AICompanion.LipSync
                 while (elapsed < duration)
                 {
                     var t = Mathf.Clamp01(elapsed / duration);
-                    ApplyFrameBlend(currentFrame.viseme, nextFrame.viseme, Mathf.SmoothStep(0f, 1f, t));
+                    ApplyFrameBlend(currentFrame.viseme, nextFrame.viseme, Mathf.SmoothStep(0f, 1f, t), Time.deltaTime);
                     elapsed += Time.deltaTime;
                     yield return null;
                 }
@@ -113,64 +148,85 @@ namespace Nyxara.AICompanion.LipSync
                 return;
             }
 
-            ResetMappedBlendshapes();
-
-            var mappingForViseme = lipSyncData.visemeMappings.Find(m => m.viseme == viseme);
-            if (mappingForViseme != null)
-            {
-                SetMappingWeight(mappingForViseme, mappingForViseme.intensity * visemeIntensityScale);
-            }
-
-            var jawContribution = mappingForViseme != null ? mappingForViseme.jawOpenContribution : 0f;
-            ApplyJawOpen(jawContribution * mouthOpenAmount);
+            ApplyImmediateTargets(BuildFrameTargets(viseme, viseme, 1f));
         }
 
-        private void ApplyFrameBlend(Viseme currentViseme, Viseme nextViseme, float t)
+        private void ApplyFrameBlend(Viseme currentViseme, Viseme nextViseme, float t, float deltaTime)
         {
             if (GetAllRenderers().Count == 0 || lipSyncData == null)
             {
                 return;
             }
 
-            ResetMappedBlendshapes();
+            ApplySmoothedTargets(BuildFrameTargets(currentViseme, nextViseme, t), deltaTime);
+        }
+
+        private Dictionary<string, float> BuildFrameTargets(Viseme currentViseme, Viseme nextViseme, float blend)
+        {
+            var targets = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+            if (lipSyncData == null)
+            {
+                return targets;
+            }
 
             var currentMapping = ResolveMapping(currentViseme);
             var nextMapping = ResolveMapping(nextViseme);
 
             if (currentMapping != null)
             {
-                var currentWeight = Mathf.Lerp(currentMapping.intensity * visemeIntensityScale, 0f, t);
-                SetMappingWeight(currentMapping, currentWeight);
+                var currentWeight = Mathf.Lerp(currentMapping.intensity * visemeIntensityScale, 0f, blend);
+                AddMappingTargets(targets, currentMapping, currentWeight);
             }
 
-            if (nextMapping != null && nextMapping != currentMapping)
+            if (nextMapping != null)
             {
-                var nextWeight = Mathf.Lerp(0f, nextMapping.intensity * visemeIntensityScale, t);
-                SetMappingWeight(nextMapping, nextWeight);
+                var nextWeight = nextMapping == currentMapping
+                    ? Mathf.Lerp(nextMapping.intensity * visemeIntensityScale, nextMapping.intensity * visemeIntensityScale, blend)
+                    : Mathf.Lerp(0f, nextMapping.intensity * visemeIntensityScale, blend);
+                AddMappingTargets(targets, nextMapping, nextWeight);
             }
 
             var currentJaw = currentMapping != null ? currentMapping.jawOpenContribution : 0f;
             var nextJaw = nextMapping != null ? nextMapping.jawOpenContribution : 0f;
-            ApplyJawOpen(Mathf.Lerp(currentJaw, nextJaw, t) * mouthOpenAmount);
+            AddJawTargets(targets, Mathf.Lerp(currentJaw, nextJaw, blend) * mouthOpenAmount);
+            return targets;
         }
 
-        private void ApplyJawOpen(float amount)
+        private void AddMappingTargets(IDictionary<string, float> targets, VisemeMapping mapping, float rawWeight)
+        {
+            if (mapping == null)
+            {
+                return;
+            }
+
+            var shapedWeight = ShapeTargetWeight(rawWeight);
+            foreach (var blendshapeName in mapping.EnumerateBlendshapeNames())
+            {
+                targets[blendshapeName] = shapedWeight;
+            }
+        }
+
+        private void AddJawTargets(IDictionary<string, float> targets, float amount)
         {
             if (lipSyncData == null)
             {
                 return;
             }
 
-            var jawWeight = amount * lipSyncData.jawOpenMultiplier * 100f;
-            SetBlendshapeWeight("jawOpen", jawWeight);
+            var rawJawWeight = amount * lipSyncData.jawOpenMultiplier * 100f;
+            var jawWeight = ShapeTargetWeight(rawJawWeight);
+            targets["jawOpen"] = jawWeight;
 
             // These helpers expose the teeth/opening more naturally during speech.
-            SetBlendshapeWeight("mouthLowerDownLeft", jawWeight * lowerLipDropAmount);
-            SetBlendshapeWeight("mouthLowerDownRight", jawWeight * lowerLipDropAmount);
-            SetBlendshapeWeight("mouthUpperUpLeft", jawWeight * upperLipRaiseAmount);
-            SetBlendshapeWeight("mouthUpperUpRight", jawWeight * upperLipRaiseAmount);
-            SetBlendshapeWeight("mouthStretchLeft", jawWeight * mouthStretchAmount);
-            SetBlendshapeWeight("mouthStretchRight", jawWeight * mouthStretchAmount);
+            var lowerLipWeight = ShapeTargetWeight(rawJawWeight * lowerLipDropAmount);
+            var upperLipWeight = ShapeTargetWeight(rawJawWeight * upperLipRaiseAmount);
+            var stretchWeight = ShapeTargetWeight(rawJawWeight * mouthStretchAmount);
+            targets["mouthLowerDownLeft"] = lowerLipWeight;
+            targets["mouthLowerDownRight"] = lowerLipWeight;
+            targets["mouthUpperUpLeft"] = upperLipWeight;
+            targets["mouthUpperUpRight"] = upperLipWeight;
+            targets["mouthStretchLeft"] = stretchWeight;
+            targets["mouthStretchRight"] = stretchWeight;
         }
 
         private IEnumerator SimpleJawMovement()
@@ -181,7 +237,7 @@ namespace Nyxara.AICompanion.LipSync
             while (timer < duration)
             {
                 var jawWeight = Mathf.PingPong(timer * 8f, 28f);
-                ApplyJawOpen(jawWeight / 100f);
+                ApplySmoothedTargets(BuildJawOnlyTargets(jawWeight / 100f), Time.deltaTime);
                 timer += Time.deltaTime;
                 yield return null;
             }
@@ -253,13 +309,12 @@ namespace Nyxara.AICompanion.LipSync
             while (elapsed < releaseDuration)
             {
                 var t = Mathf.Clamp01(elapsed / Mathf.Max(0.01f, releaseDuration));
-                ApplyFrameBlend(Viseme.sil, Viseme.sil, t);
+                ApplyFrameBlend(Viseme.sil, Viseme.sil, t, Time.deltaTime);
                 elapsed += Time.deltaTime;
                 yield return null;
             }
 
-            ResetMappedBlendshapes();
-            ApplyJawOpen(0f);
+            ApplyImmediateTargets(new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase));
         }
 
         private VisemeMapping ResolveMapping(Viseme viseme)
@@ -269,28 +324,75 @@ namespace Nyxara.AICompanion.LipSync
 
         private void ResetMappedBlendshapes()
         {
-            if (lipSyncData == null)
-            {
-                return;
-            }
+            ApplyImmediateTargets(new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase));
+        }
 
-            foreach (var mapping in lipSyncData.visemeMappings)
+        private Dictionary<string, float> BuildJawOnlyTargets(float amount)
+        {
+            var targets = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+            AddJawTargets(targets, amount);
+            return targets;
+        }
+
+        private void ApplySmoothedTargets(IReadOnlyDictionary<string, float> targets, float deltaTime)
+        {
+            foreach (var blendshapeName in _trackedBlendshapeNames)
             {
-                SetMappingWeight(mapping, 0f);
+                var targetWeight = targets != null && targets.TryGetValue(blendshapeName, out var target) ? target : 0f;
+                var currentWeight = _appliedBlendshapeWeights.TryGetValue(blendshapeName, out var current)
+                    ? current
+                    : GetBlendshapeWeight(blendshapeName);
+                var smoothing = 1f - Mathf.Exp(-Mathf.Max(1f, lipSyncData.responseSmoothing) * Mathf.Max(0.001f, deltaTime));
+                var nextWeight = Mathf.Lerp(currentWeight, targetWeight, smoothing);
+                SetBlendshapeWeight(blendshapeName, nextWeight);
+                _appliedBlendshapeWeights[blendshapeName] = nextWeight;
             }
         }
 
-        private void SetMappingWeight(VisemeMapping mapping, float weight)
+        private void ApplyImmediateTargets(IReadOnlyDictionary<string, float> targets)
         {
-            if (mapping == null)
+            foreach (var blendshapeName in _trackedBlendshapeNames)
             {
-                return;
+                var targetWeight = targets != null && targets.TryGetValue(blendshapeName, out var target) ? target : 0f;
+                SetBlendshapeWeight(blendshapeName, targetWeight);
+                _appliedBlendshapeWeights[blendshapeName] = targetWeight;
+            }
+        }
+
+        private float ShapeTargetWeight(float rawWeight)
+        {
+            var normalized = Mathf.Clamp01(rawWeight / 100f);
+            var responseEnd = Mathf.Max(lipSyncData.responseStart + 0.001f, lipSyncData.responseEnd);
+            var mapped = Mathf.InverseLerp(lipSyncData.responseStart, responseEnd, normalized);
+            var shaped = Mathf.Pow(Mathf.Clamp01(mapped), Mathf.Max(0.01f, lipSyncData.responseFalloff));
+            return shaped * 100f;
+        }
+
+        private float GetBlendshapeWeight(string blendshapeName)
+        {
+            if (string.IsNullOrWhiteSpace(blendshapeName))
+            {
+                return 0f;
             }
 
-            foreach (var blendshapeName in mapping.EnumerateBlendshapeNames())
+            foreach (var renderer in GetAllRenderers())
             {
-                SetBlendshapeWeight(blendshapeName, weight);
+                if (renderer == null || renderer.sharedMesh == null)
+                {
+                    continue;
+                }
+
+                foreach (var candidate in ArkItBlendshapeDriver.ResolveBlendshapeCandidates(blendshapeName))
+                {
+                    var index = renderer.sharedMesh.GetBlendShapeIndex(candidate);
+                    if (index >= 0)
+                    {
+                        return renderer.GetBlendShapeWeight(index);
+                    }
+                }
             }
+
+            return 0f;
         }
 
         private void SetBlendshapeWeight(string blendshapeName, float weight)
@@ -307,10 +409,13 @@ namespace Nyxara.AICompanion.LipSync
                     continue;
                 }
 
-                var index = renderer.sharedMesh.GetBlendShapeIndex(blendshapeName);
-                if (index >= 0)
+                foreach (var candidate in ArkItBlendshapeDriver.ResolveBlendshapeCandidates(blendshapeName))
                 {
-                    renderer.SetBlendShapeWeight(index, weight);
+                    var index = renderer.sharedMesh.GetBlendShapeIndex(candidate);
+                    if (index >= 0)
+                    {
+                        renderer.SetBlendShapeWeight(index, weight);
+                    }
                 }
             }
         }

@@ -14,6 +14,10 @@ namespace Nyxara.AICompanion.LipSync
         [Header("Animation Settings")]
         public float smoothTime = 0.05f;
         public float jawOpenMultiplier = 0.7f;
+        [Range(0f, 0.95f)] public float responseStart = 0f;
+        [Range(0.05f, 1f)] public float responseEnd = 1f;
+        [Range(0.25f, 3f)] public float responseFalloff = 1.35f;
+        [Range(1f, 25f)] public float responseSmoothing = 12f;
 
         [Header("Debug")]
         public bool showDebugInfo;
