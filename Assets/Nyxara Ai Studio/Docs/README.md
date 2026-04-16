@@ -1,5 +1,36 @@
 # Nyxara AI Studio
 
+Fully local AI companion system for Unity — no API or cloud required.
+
+## ⚡ Quick Start
+
+1. Import the package  
+2. Download any optional external dependencies you want to use  
+3. Open `Nyxara AI > Studio > Setup Wizard`
+4. Browse to your downloaded files and click install  
+5. Open `Nyxara AI > Studio`
+6. Assign character  
+7. Click `Build Studio`  
+8. Click `Finalize Companion Root Prefab`  
+9. Press Play and test
+
+## Important
+
+Nyxara AI Studio supports external AI integrations (LLMUnity, Whisper, Piper).
+
+The package compiles and the demo scene loads in a clean Unity project without these dependencies installed.
+
+These are NOT required for importing the package.
+
+Nyxara Setup Wizard does not download anything or connect to external services. It only copies files or folders that the user manually selects inside Unity into the correct project locations.
+
+If not installed:
+- AI generation is disabled
+- Speech-to-text is disabled
+- Text-to-speech is disabled
+
+The project will still import and run without errors.
+
 Nyxara AI Studio is a Unity editor and runtime tool for turning ARKit-compatible 3D characters into AI companions with a one-click setup flow.
 
 It is built for creators who want a practical local-first workflow inside Unity: set up a character, build a studio root, finalize a companion prefab, and test speech, lip sync, and status tools from one place.
@@ -26,31 +57,8 @@ It is built for creators who want a practical local-first workflow inside Unity:
 
 ---
 
-## Basic Workflow
 
-1. Import Nyxara AI Studio
-2. Download any optional external dependencies you want to use (see below)
-3. Open `Nyxara AI > Studio > Setup Wizard`
-4. Browse to the files or folders you downloaded and click install
-5. Open `Nyxara AI > Studio`
-6. Assign a compatible source character
-7. Build the studio root
-8. Finalize the companion prefab
-9. Enter Play Mode and test the local stack
-
----
-
-## Important
-
-The package compiles and the demo scene loads in a clean Unity project without these dependencies installed.
-
-If dependencies are not installed, Nyxara AI Studio will still import and run, but AI, speech-to-text, and voice features will remain disabled until configured.
-
-Nyxara Setup Wizard does not download anything or connect to external services. It only copies files or folders that the user manually selects inside Unity into the correct project locations.
-
----
-
-## External Dependencies (Required For Full Functionality)
+## External Dependencies (LLM and STT required for full functionality, TTS optional)
 
 Nyxara AI Studio relies on external tools for AI, speech, and runtime processing.
 
@@ -63,6 +71,7 @@ These are NOT included in the package and must be installed separately.
 
 - **whisper.unity** (Speech-to-text in Unity)  
   [https://github.com/Macoron/whisper.unity](https://github.com/Macoron/whisper.unity)
+If the package does not install correctly via Package Manager, you may download and import it manually from the repository.
 
 - **Piper TTS** (Local text-to-speech)  
   [https://github.com/rhasspy/piper/releases](https://github.com/rhasspy/piper/releases)
@@ -81,7 +90,37 @@ https://huggingface.co/Aldaris/gemma-3-4b-it-Q4_K_M-GGUF
 Download voices from:
 
 https://huggingface.co/rhasspy/piper-voices
+
+
 ---
+
+## ⚙️ External Setup (Inside Unity)
+
+After downloading the optional external tools, use Nyxara Setup Wizard to place them into the correct locations automatically.
+
+1. Open:
+   Nyxara AI → Studio → Setup Wizard
+
+2. Browse and install what you want to use:
+
+   - LLM `.gguf`
+   - Whisper Unity package folder
+   - Whisper model
+   - Piper runtime folder
+   - Piper voice `.onnx`
+
+3. Open:
+   Nyxara AI → Studio
+
+4. Go to the **Status** tab and verify the paths and status fields:
+   - LLM Model Status → Found
+   - Whisper Model Status → Found
+   - Voice Output Status → Ready (if configured)
+
+Voice output is optional.  
+If Piper is not configured, Nyxara AI Studio will still work using text-based responses.
+
+The wizard only works with files or folders the user manually selects. It does not download anything or connect to external services automatically.
 
 ## Unity Packages Used
 
@@ -106,33 +145,9 @@ The following are intentionally NOT included in the package:
 - External repositories (`LLMUnity`, `Piper`, `Whisper`, etc.)
 - Any third-party characters, meshes, or textures
 
-Typical paths are for reference only.
+Any example paths shown are for reference only.
 
 You must supply your own models and runtime files.
-
----
-
-## Setup Wizard
-
-Nyxara AI Studio includes `Nyxara Setup Wizard` under `Nyxara AI > Studio > Setup Wizard`.
-
-Use it after you manually download your optional dependencies.
-
-The wizard can:
-
-- copy a `.gguf` LLM model into `StreamingAssets/Models`
-- import the Whisper Unity integration from a downloaded folder when it contains a `.unitypackage`, an `Assets` folder, or an embedded `package.json` package
-- copy a Whisper model into `StreamingAssets/Speech`
-- copy a Piper runtime folder into `StreamingAssets/Speech/PiperRuntime`
-- copy a Piper voice model into `StreamingAssets/Speech/PiperVoices`
-- update the Studio Config automatically so the rest of Nyxara uses the installed paths
-
-What it does not do:
-
-- it does not download dependencies
-- it does not search your computer automatically
-- it does not connect to the internet
-- it does not modify files outside the Unity project
 
 ---
 
@@ -193,3 +208,6 @@ Demo characters shown in videos are NOT included.
 Nyxara AI Studio is designed to work with any ARKit-compatible character.
 
 ---
+
+For complete documentation, including setup, dependencies, and usage instructions, visit:
+https://github.com/BillyRaz/Nyxara-AI-Studio
