@@ -452,14 +452,14 @@ namespace Nyxara.AICompanion.Editor
 
             var statuses = new List<StudioStatusItem>
             {
-                new("LLM", llmReady, llmStatusLabel, "Missing", modelFound
+                new("LLM", llmReady, llmStatusLabel, llmStatusLabel, modelFound
                     ? llmDetected
                         ? "LLMUnity is present and the model path is valid. Use the Setup Wizard validator if the current scene still needs binding repair."
                         : "LLM model path is valid, but the LLMUnity package is not detected yet."
                     : llmDetected
                         ? "LLMUnity is present. Set or validate a GGUF model path, then bind it to the current scene."
                         : "Set a valid local GGUF model path and install LLMUnity, then build or validate the studio root."),
-                new("STT", sttReady, sttStatusLabel, "Missing", whisperModelFound
+                new("STT", sttReady, sttStatusLabel, sttStatusLabel, whisperModelFound
                     ? whisperDetected
                         ? "Whisper is present and the model path is valid. Use the Setup Wizard validator if the current scene still needs binding repair."
                         : "Whisper model path is valid, but whisper.unity is not detected yet."

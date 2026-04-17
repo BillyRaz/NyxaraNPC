@@ -274,26 +274,39 @@ namespace Nyxara.AICompanion.Editor
         {
             EditorGUILayout.BeginHorizontal();
             value = EditorGUILayout.TextField(label, value);
-            if (GUILayout.Button("Folder", GUILayout.Width(70f)))
+            if (GUILayout.Button("Browse", GUILayout.Width(90f)))
             {
-                var startDirectory = GetSafeBrowseDirectory(value);
-                var selected = EditorUtility.OpenFolderPanel(folderTitle, startDirectory, string.Empty);
-                if (!string.IsNullOrWhiteSpace(selected))
+                var currentValue = value;
+                var browseMenu = new GenericMenu();
+                browseMenu.AddItem(new GUIContent("Folder..."), false, () =>
                 {
-                    value = selected.Replace('\\', '/');
-                }
-            }
-
-            if (GUILayout.Button("ZIP", GUILayout.Width(60f)))
-            {
-                var startDirectory = GetSafeBrowseDirectory(value);
-                var selected = EditorUtility.OpenFilePanel(zipTitle, startDirectory, "zip");
-                if (!string.IsNullOrWhiteSpace(selected))
+                    var startDirectory = GetSafeBrowseDirectory(currentValue);
+                    var selected = EditorUtility.OpenFolderPanel(folderTitle, startDirectory, string.Empty);
+                    if (!string.IsNullOrWhiteSpace(selected))
+                    {
+                        EditorApplication.delayCall += () => SessionState.SetString($"{SessionKeyPrefix}PendingFolderOrZipSelection", selected.Replace('\\', '/'));
+                    }
+                });
+                browseMenu.AddItem(new GUIContent("ZIP..."), false, () =>
                 {
-                    value = selected.Replace('\\', '/');
-                }
+                    var startDirectory = GetSafeBrowseDirectory(currentValue);
+                    var selected = EditorUtility.OpenFilePanel(zipTitle, startDirectory, "zip");
+                    if (!string.IsNullOrWhiteSpace(selected))
+                    {
+                        EditorApplication.delayCall += () => SessionState.SetString($"{SessionKeyPrefix}PendingFolderOrZipSelection", selected.Replace('\\', '/'));
+                    }
+                });
+                browseMenu.ShowAsContext();
             }
             EditorGUILayout.EndHorizontal();
+
+            var pendingSelectionKey = $"{SessionKeyPrefix}PendingFolderOrZipSelection";
+            var pendingSelection = SessionState.GetString(pendingSelectionKey, string.Empty);
+            if (!string.IsNullOrWhiteSpace(pendingSelection))
+            {
+                value = pendingSelection;
+                SessionState.EraseString(pendingSelectionKey);
+            }
         }
 
         private void InstallAllSelected()
