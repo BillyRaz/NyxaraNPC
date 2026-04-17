@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Bilal Raza
+// Publisher: RAZ Studio
+// Product: Nyxara AI Studio
+
 #if UNITY_EDITOR
 using System;
 using System.Collections.Generic;
@@ -20,8 +24,9 @@ namespace Nyxara.AICompanion.Editor
 {
     public class NyxaraCompanionStudioWindow : EditorWindow
     {
-        private const string DefaultStudioRootFolder = "Assets/Nyxara Ai Studio/AICompanionStudio";
-        private const string DefaultConfigPath = "Assets/Nyxara Ai Studio/AICompanionStudio/Generated/AICompanionStudioConfig.asset";
+        private const string DefaultStudioRootFolder = "Assets/Nyxara AI Studio";
+        private const string DefaultGeneratedFolder = DefaultStudioRootFolder + "/Generated";
+        private const string DefaultConfigPath = DefaultGeneratedFolder + "/AICompanionStudioConfig.asset";
         private const string LegacyRootConfigPath = "Assets/NyxaraAIStudio/Generated/NyxaraAIStudioConfig.asset";
         private const string LegacyDefaultConfigPath = "Assets/AICompanionStudio/Generated/AICompanionStudioConfig.asset";
         private const string StudioTabPrefsKey = "NyxaraStudio.CurrentTab";
@@ -403,18 +408,41 @@ namespace Nyxara.AICompanion.Editor
             var llmAgent = FindOptionalComponent(studioRoot, "LLMAgent");
             var whisperInput = FindFirstObjectByType<WhisperMicrophoneInput>();
             var ttsService = FindFirstObjectByType<PiperTtsService>();
+            var integrationSnapshot = NyxaraIntegrationValidator.CaptureSnapshot(_config);
 
             var resolvedModelPath = ResolveModelStatusPath(_config.llmModelPath);
             var modelFound = !string.IsNullOrWhiteSpace(resolvedModelPath) && File.Exists(resolvedModelPath);
             var llmConnected = HasLiveLlm(llmAgent);
-            var llmReady = llmConnected || modelFound;
-            var llmStatusLabel = llmConnected ? "Connected" : modelFound ? "Configured" : "Missing";
+            var llmDetected = integrationSnapshot.LlmPackageDetected || integrationSnapshot.LlmTypeAvailable;
+            var llmReady = llmConnected || (llmDetected && modelFound);
+            var llmStatusLabel = llmConnected
+                ? "Connected"
+                : llmDetected
+                    ? modelFound
+                        ? "Detected + Model"
+                        : integrationSnapshot.LlmDefineEnabled
+                            ? "Detected"
+                            : "Detected (Validate)"
+                    : modelFound
+                        ? "Model Only"
+                        : "Missing";
 
             var resolvedWhisperPath = ResolveAbsoluteOrProjectPath(_config.whisperModelRelativePath);
             var whisperModelFound = !string.IsNullOrWhiteSpace(resolvedWhisperPath) && File.Exists(resolvedWhisperPath);
             var sttConnected = whisperInput != null && whisperInput.IsWhisperAvailable;
-            var sttReady = sttConnected || whisperModelFound;
-            var sttStatusLabel = sttConnected ? "Connected" : whisperModelFound ? "Configured" : "Missing";
+            var whisperDetected = integrationSnapshot.WhisperPackageDetected || integrationSnapshot.WhisperTypeAvailable;
+            var sttReady = sttConnected || (whisperDetected && whisperModelFound);
+            var sttStatusLabel = sttConnected
+                ? "Connected"
+                : whisperDetected
+                    ? whisperModelFound
+                        ? "Detected + Model"
+                        : integrationSnapshot.WhisperDefineEnabled
+                            ? "Detected"
+                            : "Detected (Validate)"
+                    : whisperModelFound
+                        ? "Model Only"
+                        : "Missing";
 
             var ttsStatus = ttsService != null
                 ? ttsService.AvailabilityStatus
@@ -425,11 +453,19 @@ namespace Nyxara.AICompanion.Editor
             var statuses = new List<StudioStatusItem>
             {
                 new("LLM", llmReady, llmStatusLabel, "Missing", modelFound
-                    ? "LLM model path is valid. Build Studio or Apply Config To Live Root to connect it in the current scene."
-                    : "Set a valid local GGUF model path, then build or apply the studio root."),
+                    ? llmDetected
+                        ? "LLMUnity is present and the model path is valid. Use the Setup Wizard validator if the current scene still needs binding repair."
+                        : "LLM model path is valid, but the LLMUnity package is not detected yet."
+                    : llmDetected
+                        ? "LLMUnity is present. Set or validate a GGUF model path, then bind it to the current scene."
+                        : "Set a valid local GGUF model path and install LLMUnity, then build or validate the studio root."),
                 new("STT", sttReady, sttStatusLabel, "Missing", whisperModelFound
-                    ? "Whisper model path is valid. Build Studio or Apply Config To Live Root to connect speech input in the current scene."
-                    : "Set a valid Whisper model path, then build or apply the studio root."),
+                    ? whisperDetected
+                        ? "Whisper is present and the model path is valid. Use the Setup Wizard validator if the current scene still needs binding repair."
+                        : "Whisper model path is valid, but whisper.unity is not detected yet."
+                    : whisperDetected
+                        ? "whisper.unity is present. Set or validate a Whisper model path, then bind it to the current scene."
+                        : "Set a valid Whisper model path and install whisper.unity, then build or validate the studio root."),
                 new("TTS", ttsReady, ttsStatusLabel, ttsStatusLabel, PiperTtsService.GetStatusGuidance(ttsStatus)),
                 new("Model", modelFound, "Found", "Missing", "Put the GGUF model in StreamingAssets/Models or point the Studio Config to the correct file.")
             };
@@ -562,9 +598,9 @@ namespace Nyxara.AICompanion.Editor
                     _config.llmModelPath = liveLlmPath;
                 }
 
-                if (whisperInput != null && whisperInput.IsWhisperAvailable && whisperInput.WhisperManager != null && !string.IsNullOrWhiteSpace(whisperInput.WhisperManager.ModelPath))
+                if (whisperInput != null && whisperInput.IsWhisperAvailable && whisperInput.HasAssignedWhisperManager && !string.IsNullOrWhiteSpace(whisperInput.ConfiguredModelPath))
                 {
-                    _config.whisperModelRelativePath = whisperInput.WhisperManager.ModelPath;
+                    _config.whisperModelRelativePath = whisperInput.ConfiguredModelPath;
                 }
 
                 if (ttsService != null)
@@ -2715,8 +2751,8 @@ namespace Nyxara.AICompanion.Editor
         private static void EnsureConfigAssetFolder()
         {
             EnsureAssetFolderPath(DefaultStudioRootFolder);
-            EnsureAssetFolderPath($"{DefaultStudioRootFolder}/Generated");
-            var absoluteGeneratedFolder = GetAbsolutePathFromAssetPath($"{DefaultStudioRootFolder}/Generated");
+            EnsureAssetFolderPath(DefaultGeneratedFolder);
+            var absoluteGeneratedFolder = GetAbsolutePathFromAssetPath(DefaultGeneratedFolder);
             if (!string.IsNullOrWhiteSpace(absoluteGeneratedFolder))
             {
                 Directory.CreateDirectory(absoluteGeneratedFolder);
@@ -2760,34 +2796,34 @@ namespace Nyxara.AICompanion.Editor
                 config.rootFolder = DefaultStudioRootFolder;
             }
 
+            config.generatedFolder = NormalizeLegacyStudioSubfolder(config.generatedFolder, "Generated");
+            if (string.IsNullOrWhiteSpace(config.generatedFolder))
+            {
+                config.generatedFolder = DefaultGeneratedFolder;
+            }
+
             config.prefabFolder = NormalizeLegacyStudioSubfolder(config.prefabFolder, "Prefabs");
             if (string.IsNullOrWhiteSpace(config.prefabFolder))
             {
-                config.prefabFolder = $"{config.rootFolder}/Prefabs";
+                config.prefabFolder = $"{config.generatedFolder}/Prefabs";
             }
 
             config.companionPrefabFolder = NormalizeLegacyStudioSubfolder(config.companionPrefabFolder, "Companions");
             if (string.IsNullOrWhiteSpace(config.companionPrefabFolder))
             {
-                config.companionPrefabFolder = $"{config.rootFolder}/Companions";
+                config.companionPrefabFolder = $"{config.generatedFolder}/Companions";
             }
 
             config.profileFolder = NormalizeLegacyStudioSubfolder(config.profileFolder, "Profiles");
             if (string.IsNullOrWhiteSpace(config.profileFolder))
             {
-                config.profileFolder = $"{config.rootFolder}/Profiles";
-            }
-
-            config.generatedFolder = NormalizeLegacyStudioSubfolder(config.generatedFolder, "Generated");
-            if (string.IsNullOrWhiteSpace(config.generatedFolder))
-            {
-                config.generatedFolder = $"{config.rootFolder}/Generated";
+                config.profileFolder = $"{config.generatedFolder}/Profiles";
             }
 
             config.expressionFolder = NormalizeLegacyStudioSubfolder(config.expressionFolder, "Expressions");
             if (string.IsNullOrWhiteSpace(config.expressionFolder))
             {
-                config.expressionFolder = $"{config.rootFolder}/Expressions";
+                config.expressionFolder = $"{config.generatedFolder}/Expressions";
             }
         }
 
@@ -2816,8 +2852,12 @@ namespace Nyxara.AICompanion.Editor
         private static string NormalizeLegacyStudioRoot(string path)
         {
             if (string.IsNullOrWhiteSpace(path) ||
+                string.Equals(path, DefaultGeneratedFolder, StringComparison.Ordinal) ||
+                string.Equals(path, "Assets/Nyxara Ai Studio/AICompanionStudio", StringComparison.Ordinal) ||
+                string.Equals(path, "Assets/Nyxara AI Studio/AICompanionStudio", StringComparison.Ordinal) ||
                 string.Equals(path, "Assets/NyxaraAIStudio", StringComparison.Ordinal) ||
-                string.Equals(path, "Assets/AICompanionStudio", StringComparison.Ordinal))
+                string.Equals(path, "Assets/AICompanionStudio", StringComparison.Ordinal) ||
+                !IsInsidePackageRoot(path))
             {
                 return DefaultStudioRootFolder;
             }
@@ -2833,12 +2873,24 @@ namespace Nyxara.AICompanion.Editor
             }
 
             if (string.Equals(path, $"Assets/NyxaraAIStudio/{childFolder}", StringComparison.Ordinal) ||
-                string.Equals(path, $"Assets/AICompanionStudio/{childFolder}", StringComparison.Ordinal))
+                string.Equals(path, $"Assets/AICompanionStudio/{childFolder}", StringComparison.Ordinal) ||
+                string.Equals(path, $"Assets/Nyxara Ai Studio/AICompanionStudio/{childFolder}", StringComparison.Ordinal) ||
+                string.Equals(path, $"Assets/Nyxara AI Studio/AICompanionStudio/{childFolder}", StringComparison.Ordinal) ||
+                !IsInsidePackageRoot(path))
             {
-                return $"{DefaultStudioRootFolder}/{childFolder}";
+                return childFolder == "Generated"
+                    ? DefaultGeneratedFolder
+                    : $"{DefaultGeneratedFolder}/{childFolder}";
             }
 
             return path;
+        }
+
+        private static bool IsInsidePackageRoot(string path)
+        {
+            return string.Equals(path, DefaultStudioRootFolder, StringComparison.Ordinal) ||
+                   string.Equals(path, DefaultGeneratedFolder, StringComparison.Ordinal) ||
+                   path.StartsWith(DefaultStudioRootFolder + "/", StringComparison.Ordinal);
         }
 
         private static void EnsureAssetFolderPath(string assetPath)

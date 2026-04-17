@@ -1,7 +1,12 @@
+// Copyright (c) 2026 Bilal Raza
+// Publisher: RAZ Studio
+// Product: Nyxara AI Studio
+
 #if UNITY_EDITOR
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using Nyxara.AICompanion.Configuration;
 using Nyxara.AICompanion.LipSync;
@@ -15,8 +20,9 @@ namespace Nyxara.AICompanion.Editor
 {
     public class NyxaraSetupWizardWindow : EditorWindow
     {
+        private const string SessionKeyPrefix = "NyxaraSetupWizard.";
         private const string WizardTitle = "Nyxara Setup Wizard";
-        private const string DefaultConfigPath = "Assets/Nyxara Ai Studio/AICompanionStudio/Generated/AICompanionStudioConfig.asset";
+        private const string DefaultConfigPath = "Assets/Nyxara AI Studio/Generated/AICompanionStudioConfig.asset";
         private const string DefaultModelsFolder = "Models";
         private const string DefaultSpeechFolder = "Speech";
         private const string DefaultPiperRuntimeFolder = "Speech/PiperRuntime";
@@ -45,6 +51,10 @@ namespace Nyxara.AICompanion.Editor
             _config = LoadOrCreateConfig();
             ApplyDefaultPathsIfEmpty(_config);
             NormalizeOptionalDependencyState();
+            if (NyxaraIntegrationValidator.RestoreSummaryFromSessionState(SessionKeyPrefix, out var summary, out var messageType))
+            {
+                SetSummary(summary, messageType);
+            }
         }
 
         private void OnGUI()
@@ -87,6 +97,7 @@ namespace Nyxara.AICompanion.Editor
 
         private void DrawOverview()
         {
+            var snapshot = NyxaraIntegrationValidator.CaptureSnapshot(_config);
             EditorGUILayout.BeginVertical("box");
             EditorGUILayout.LabelField("New User Setup", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
@@ -94,6 +105,9 @@ namespace Nyxara.AICompanion.Editor
                 MessageType.Info);
             EditorGUILayout.HelpBox(
                 "Install targets: GGUF -> StreamingAssets/Models, Whisper model -> StreamingAssets/Speech, Piper runtime -> StreamingAssets/Speech/PiperRuntime, Piper voice -> StreamingAssets/Speech/PiperVoices.",
+                MessageType.None);
+            EditorGUILayout.HelpBox(
+                "Already installed something manually or from a repo? Use Validate & Bind Installed Integrations to detect packages already in the project, preserve valid paths, and repair Nyxara hookups without reinstalling.",
                 MessageType.None);
 
             var whisperStatus = string.IsNullOrWhiteSpace(_config.whisperModelRelativePath)
@@ -107,6 +121,9 @@ namespace Nyxara.AICompanion.Editor
             EditorGUILayout.LabelField("Piper Runtime", GetConfigDisplayPath(_config.piperExecutablePath));
             EditorGUILayout.LabelField("Piper Voice", GetConfigDisplayPath(_config.piperVoicePath));
             EditorGUILayout.LabelField("Voice Output", PiperTtsService.GetStatusLabel(ttsStatus));
+            EditorGUILayout.LabelField("LLMUnity", DescribeIntegrationState(snapshot.LlmPackageDetected, snapshot.LlmTypeAvailable, snapshot.LlmDefineEnabled, snapshot.LlmBindingPresent));
+            EditorGUILayout.LabelField("whisper.unity", DescribeIntegrationState(snapshot.WhisperPackageDetected, snapshot.WhisperTypeAvailable, snapshot.WhisperDefineEnabled, snapshot.WhisperBindingPresent));
+            EditorGUILayout.LabelField("Piper Validation", snapshot.PiperReady ? "Ready" : snapshot.PiperRuntimeValid || snapshot.PiperVoiceValid ? "Partial" : "Not Configured");
             EditorGUILayout.EndVertical();
         }
 
@@ -126,9 +143,9 @@ namespace Nyxara.AICompanion.Editor
             try
             {
                 EditorGUILayout.LabelField("2. Speech To Text (Whisper)", EditorStyles.boldLabel);
-                EditorGUILayout.HelpBox("You can install the Whisper Unity integration from a downloaded folder and optionally copy a Whisper model into StreamingAssets/Speech. Sample/demo folders are skipped to avoid bringing broken example scripts into the project.", MessageType.None);
-                DrawFolderPicker("Whisper Package Folder", ref _whisperIntegrationFolderPath, "Select Whisper Package Folder");
-                EditorGUILayout.LabelField("Package Action", string.IsNullOrWhiteSpace(_whisperIntegrationFolderPath) ? "No Whisper integration folder selected" : DescribeWhisperImportTarget(_whisperIntegrationFolderPath));
+                EditorGUILayout.HelpBox("You can install the Whisper Unity integration from a downloaded folder or ZIP and optionally copy a Whisper model into StreamingAssets/Speech. Sample/demo folders are skipped to avoid bringing broken example scripts into the project.", MessageType.None);
+                DrawFolderOrZipPicker("Whisper Package Folder or ZIP", ref _whisperIntegrationFolderPath, "Select Whisper Package Folder", "Select Whisper ZIP");
+                EditorGUILayout.LabelField("Package Action", string.IsNullOrWhiteSpace(_whisperIntegrationFolderPath) ? "No Whisper package folder or ZIP selected" : DescribeWhisperImportTarget(_whisperIntegrationFolderPath));
 
                 EditorGUILayout.Space(4f);
                 DrawFilePicker("Source Model", ref _whisperSourcePath, "bin", "Select Whisper Model");
@@ -192,6 +209,14 @@ namespace Nyxara.AICompanion.Editor
                 InstallAllSelected();
             }
 
+            if (GUILayout.Button("Validate & Bind Installed Integrations"))
+            {
+                ValidateInstalledIntegrations();
+            }
+
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Open StreamingAssets Folder"))
             {
                 EnsureDirectoryExists(Application.streamingAssetsPath);
@@ -245,6 +270,32 @@ namespace Nyxara.AICompanion.Editor
             EditorGUILayout.EndHorizontal();
         }
 
+        private static void DrawFolderOrZipPicker(string label, ref string value, string folderTitle, string zipTitle)
+        {
+            EditorGUILayout.BeginHorizontal();
+            value = EditorGUILayout.TextField(label, value);
+            if (GUILayout.Button("Folder", GUILayout.Width(70f)))
+            {
+                var startDirectory = GetSafeBrowseDirectory(value);
+                var selected = EditorUtility.OpenFolderPanel(folderTitle, startDirectory, string.Empty);
+                if (!string.IsNullOrWhiteSpace(selected))
+                {
+                    value = selected.Replace('\\', '/');
+                }
+            }
+
+            if (GUILayout.Button("ZIP", GUILayout.Width(60f)))
+            {
+                var startDirectory = GetSafeBrowseDirectory(value);
+                var selected = EditorUtility.OpenFilePanel(zipTitle, startDirectory, "zip");
+                if (!string.IsNullOrWhiteSpace(selected))
+                {
+                    value = selected.Replace('\\', '/');
+                }
+            }
+            EditorGUILayout.EndHorizontal();
+        }
+
         private void InstallAllSelected()
         {
             NormalizeOptionalDependencyState();
@@ -272,6 +323,15 @@ namespace Nyxara.AICompanion.Editor
             }
 
             SetSummary(string.Join(Environment.NewLine, results.Where(result => !string.IsNullOrWhiteSpace(result))), MessageType.Info);
+        }
+
+        private void ValidateInstalledIntegrations()
+        {
+            NormalizeOptionalDependencyState();
+            var report = NyxaraIntegrationValidator.ValidateAndBind(_config);
+            NyxaraIntegrationValidator.PersistSummaryToSessionState(SessionKeyPrefix, report);
+            SetSummary(report.Summary, report.MessageType);
+            Repaint();
         }
 
         private string InstallLlmModel()
@@ -341,38 +401,51 @@ namespace Nyxara.AICompanion.Editor
 
         private string InstallWhisperIntegration()
         {
-            if (!TryValidateDirectory(_whisperIntegrationFolderPath, "Whisper package folder", out var packageFolderPath))
+            if (!TryPrepareWhisperImportSource(_whisperIntegrationFolderPath, out var packageFolderPath, out var cleanupPath, out var sourceMessage))
             {
                 return _installSummary;
             }
 
-            if (TryFindAssetsFolder(packageFolderPath, out var assetsFolderPath))
+            try
             {
-                CopyDirectoryContents(assetsFolderPath, Application.dataPath, ShouldSkipWhisperImportRelativePath);
-                AssetDatabase.Refresh();
-                var message = $"Nyxara AI Studio: Imported Whisper assets from {assetsFolderPath.Replace('\\', '/')} into the Unity project without sample/demo folders.";
-                SetSummary(message, MessageType.Info);
-                return message;
-            }
+                if (TryFindAssetsFolder(packageFolderPath, out var assetsFolderPath))
+                {
+                    CopyDirectoryContents(assetsFolderPath, Application.dataPath, ShouldSkipWhisperImportRelativePath);
+                    AssetDatabase.Refresh();
+                    var message = string.IsNullOrWhiteSpace(sourceMessage)
+                        ? $"Nyxara AI Studio: Imported Whisper assets from {assetsFolderPath.Replace('\\', '/')} into the Unity project without sample/demo folders."
+                        : $"Nyxara AI Studio: {sourceMessage} Imported Whisper assets from {assetsFolderPath.Replace('\\', '/')} into the Unity project without sample/demo folders.";
+                    SetSummary(message, MessageType.Info);
+                    return message;
+                }
 
-            if (TryFindEmbeddedPackageFolder(packageFolderPath, out var embeddedPackageFolderPath))
-            {
-                var destinationFolder = Path.Combine(Directory.GetParent(Application.dataPath)?.FullName ?? Path.GetFullPath(Path.Combine(Application.dataPath, "..")), "Packages", GetSafeFileName(embeddedPackageFolderPath));
-                CopyDirectoryContents(embeddedPackageFolderPath, destinationFolder, ShouldSkipWhisperImportRelativePath);
-                AssetDatabase.Refresh();
-                var message = $"Nyxara AI Studio: Imported Whisper embedded package from {embeddedPackageFolderPath.Replace('\\', '/')} into Packages/{GetSafeFileName(embeddedPackageFolderPath)} without sample/demo folders.";
-                SetSummary(message, MessageType.Info);
-                return message;
-            }
+                if (TryFindEmbeddedPackageFolder(packageFolderPath, out var embeddedPackageFolderPath))
+                {
+                    var destinationFolder = Path.Combine(Directory.GetParent(Application.dataPath)?.FullName ?? Path.GetFullPath(Path.Combine(Application.dataPath, "..")), "Packages", GetSafeFileName(embeddedPackageFolderPath));
+                    CopyDirectoryContents(embeddedPackageFolderPath, destinationFolder, ShouldSkipWhisperImportRelativePath);
+                    AssetDatabase.Refresh();
+                    var message = string.IsNullOrWhiteSpace(sourceMessage)
+                        ? $"Nyxara AI Studio: Imported Whisper embedded package from {embeddedPackageFolderPath.Replace('\\', '/')} into Packages/{GetSafeFileName(embeddedPackageFolderPath)} without sample/demo folders."
+                        : $"Nyxara AI Studio: {sourceMessage} Imported Whisper embedded package from {embeddedPackageFolderPath.Replace('\\', '/')} into Packages/{GetSafeFileName(embeddedPackageFolderPath)} without sample/demo folders.";
+                    SetSummary(message, MessageType.Info);
+                    return message;
+                }
 
-            if (TryFindUnityPackage(packageFolderPath, out var unityPackagePath))
-            {
-                SetSummary($"Nyxara AI Studio: Found a Whisper .unitypackage at {unityPackagePath.Replace('\\', '/')}, but the setup wizard skips auto-importing .unitypackage files to avoid sample/demo script conflicts. Use an extracted Whisper folder with Assets or package.json content instead.", MessageType.Warning);
+                if (TryFindUnityPackage(packageFolderPath, out var unityPackagePath))
+                {
+                    SetSummary(string.IsNullOrWhiteSpace(sourceMessage)
+                        ? $"Nyxara AI Studio: Found a Whisper .unitypackage at {unityPackagePath.Replace('\\', '/')}, but the setup wizard skips auto-importing .unitypackage files to avoid sample/demo script conflicts. Use an extracted Whisper folder with Assets or package.json content instead."
+                        : $"Nyxara AI Studio: {sourceMessage} Found a Whisper .unitypackage at {unityPackagePath.Replace('\\', '/')}, but the setup wizard skips auto-importing .unitypackage files to avoid sample/demo script conflicts. Use an extracted Whisper folder with Assets or package.json content instead.", MessageType.Warning);
+                    return _installSummary;
+                }
+
+                SetSummary("Nyxara AI Studio: No importable Whisper package content was found. Select a Whisper folder or ZIP containing a .unitypackage, an Assets folder, or a package.json package root.", MessageType.Error);
                 return _installSummary;
             }
-
-            SetSummary("Nyxara AI Studio: No importable Whisper package content was found. Select a Whisper folder containing a .unitypackage, an Assets folder, or a package.json package root.", MessageType.Error);
-            return _installSummary;
+            finally
+            {
+                CleanupTemporaryWhisperImportPath(cleanupPath);
+            }
         }
 
         private string InstallPiperDependencies()
@@ -671,6 +744,31 @@ namespace Nyxara.AICompanion.Editor
             return string.IsNullOrWhiteSpace(configuredPath) ? "Not configured" : configuredPath.Replace('\\', '/');
         }
 
+        private static string DescribeIntegrationState(bool packageDetected, bool typeAvailable, bool defineEnabled, bool bindingPresent)
+        {
+            if (bindingPresent)
+            {
+                return "Detected and bound";
+            }
+
+            if (packageDetected && typeAvailable && defineEnabled)
+            {
+                return "Detected";
+            }
+
+            if (packageDetected && !defineEnabled)
+            {
+                return "Detected, define pending";
+            }
+
+            if (packageDetected)
+            {
+                return "Package detected";
+            }
+
+            return "Missing";
+        }
+
         private static string GetSafeBrowseDirectory(string currentPath)
         {
             try
@@ -725,9 +823,14 @@ namespace Nyxara.AICompanion.Editor
             try
             {
                 var fullPath = Path.GetFullPath(folderPath.Trim().Trim('"'));
+                if (File.Exists(fullPath) && string.Equals(Path.GetExtension(fullPath), ".zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    return DescribeWhisperZipTarget(fullPath);
+                }
+
                 if (!Directory.Exists(fullPath))
                 {
-                    return "Selected folder not found";
+                    return "Selected folder or ZIP not found";
                 }
 
                 if (TryFindUnityPackage(fullPath, out var unityPackagePath))
@@ -749,8 +852,216 @@ namespace Nyxara.AICompanion.Editor
             }
             catch (Exception)
             {
-                return "Unable to inspect selected folder";
+                return "Unable to inspect selected folder or ZIP";
             }
+        }
+
+        private bool TryPrepareWhisperImportSource(string selectedPath, out string importRootPath, out string cleanupPath, out string sourceMessage)
+        {
+            importRootPath = string.Empty;
+            cleanupPath = string.Empty;
+            sourceMessage = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(selectedPath))
+            {
+                SetSummary("Nyxara AI Studio: Select a Whisper package folder or ZIP before installing.", MessageType.Warning);
+                return false;
+            }
+
+            try
+            {
+                var fullPath = Path.GetFullPath(selectedPath.Trim().Trim('"'));
+                if (Directory.Exists(fullPath))
+                {
+                    importRootPath = fullPath;
+                    return true;
+                }
+
+                if (File.Exists(fullPath) && string.Equals(Path.GetExtension(fullPath), ".zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!TryValidateWhisperZipTarget(fullPath, out sourceMessage))
+                    {
+                        SetSummary(sourceMessage, MessageType.Error);
+                        return false;
+                    }
+
+                    cleanupPath = ExtractWhisperZipToProjectTemp(fullPath);
+                    importRootPath = cleanupPath;
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                SetSummary($"Nyxara AI Studio: Unable to prepare the Whisper package source. {ex.Message}", MessageType.Error);
+                return false;
+            }
+
+            SetSummary("Nyxara AI Studio: The selected Whisper package source could not be found. Choose a valid folder or ZIP and try again.", MessageType.Error);
+            return false;
+        }
+
+        private static string DescribeWhisperZipTarget(string zipPath)
+        {
+            if (!File.Exists(zipPath))
+            {
+                return "Selected ZIP not found";
+            }
+
+            if (!TryValidateWhisperZipTarget(zipPath, out var message))
+            {
+                return message;
+            }
+
+            return message;
+        }
+
+        private static bool TryValidateWhisperZipTarget(string zipPath, out string message)
+        {
+            message = "ZIP unsupported structure. Select a ZIP containing a .unitypackage, an Assets folder, or a package.json package root.";
+            if (string.IsNullOrWhiteSpace(zipPath) || !File.Exists(zipPath))
+            {
+                message = "Selected ZIP not found";
+                return false;
+            }
+
+            try
+            {
+                using var archive = ZipFile.OpenRead(zipPath);
+                var entryPaths = archive.Entries
+                    .Where(entry => entry != null && !string.IsNullOrWhiteSpace(entry.FullName))
+                    .Select(entry => entry.FullName.Replace('\\', '/').TrimStart('/'))
+                    .Where(path => !string.IsNullOrWhiteSpace(path))
+                    .ToList();
+
+                var unityPackagePath = entryPaths.FirstOrDefault(path => path.EndsWith(".unitypackage", StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrWhiteSpace(unityPackagePath))
+                {
+                    message = $"ZIP valid and supported. Found .unitypackage inside ZIP: {unityPackagePath}";
+                    return true;
+                }
+
+                var packageJsonPath = entryPaths.FirstOrDefault(path => path.EndsWith("/package.json", StringComparison.OrdinalIgnoreCase) || string.Equals(path, "package.json", StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrWhiteSpace(packageJsonPath))
+                {
+                    var packageRoot = Path.GetDirectoryName(packageJsonPath)?.Replace('\\', '/') ?? ".";
+                    message = $"ZIP valid and supported. Found package.json package inside ZIP: {packageRoot}";
+                    return true;
+                }
+
+                var assetsPath = entryPaths.FirstOrDefault(path => IsWhisperZipAssetsPath(path));
+                if (!string.IsNullOrWhiteSpace(assetsPath))
+                {
+                    message = $"ZIP valid and supported. Found Assets folder inside ZIP: {ExtractWhisperZipAssetsRoot(assetsPath)}";
+                    return true;
+                }
+
+                return false;
+            }
+            catch (InvalidDataException)
+            {
+                message = "Selected Whisper ZIP could not be read. Choose a valid .zip file and try again.";
+                return false;
+            }
+            catch (Exception ex)
+            {
+                message = $"Unable to inspect Whisper ZIP. {ex.Message}";
+                return false;
+            }
+        }
+
+        private static string ExtractWhisperZipToProjectTemp(string zipPath)
+        {
+            var projectTempRoot = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "NyxaraSetupWizard", "WhisperZip");
+            EnsureDirectoryExists(projectTempRoot);
+
+            var extractionRoot = Path.Combine(projectTempRoot, $"{Path.GetFileNameWithoutExtension(zipPath)}_{Guid.NewGuid():N}");
+            EnsureDirectoryExists(extractionRoot);
+
+            using var archive = ZipFile.OpenRead(zipPath);
+            foreach (var entry in archive.Entries)
+            {
+                if (entry == null || string.IsNullOrWhiteSpace(entry.FullName))
+                {
+                    continue;
+                }
+
+                var normalizedEntryPath = entry.FullName.Replace('\\', '/').TrimStart('/');
+                if (string.IsNullOrWhiteSpace(normalizedEntryPath))
+                {
+                    continue;
+                }
+
+                var destinationPath = Path.GetFullPath(Path.Combine(extractionRoot, normalizedEntryPath.Replace('/', Path.DirectorySeparatorChar)));
+                var normalizedRoot = Path.GetFullPath(extractionRoot) + Path.DirectorySeparatorChar;
+                if (!destinationPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidDataException("The selected ZIP contains an unsafe path and cannot be extracted.");
+                }
+
+                if (entry.FullName.EndsWith("/", StringComparison.Ordinal) || entry.FullName.EndsWith("\\", StringComparison.Ordinal))
+                {
+                    EnsureDirectoryExists(destinationPath);
+                    continue;
+                }
+
+                var destinationDirectory = Path.GetDirectoryName(destinationPath);
+                if (!string.IsNullOrWhiteSpace(destinationDirectory))
+                {
+                    EnsureDirectoryExists(destinationDirectory);
+                }
+
+                entry.ExtractToFile(destinationPath, true);
+            }
+
+            return extractionRoot;
+        }
+
+        private static void CleanupTemporaryWhisperImportPath(string cleanupPath)
+        {
+            if (string.IsNullOrWhiteSpace(cleanupPath))
+            {
+                return;
+            }
+
+            try
+            {
+                if (Directory.Exists(cleanupPath))
+                {
+                    Directory.Delete(cleanupPath, true);
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private static bool IsWhisperZipAssetsPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return false;
+            }
+
+            var normalized = path.Replace('\\', '/').TrimStart('/');
+            return normalized.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.Contains("/Assets/");
+        }
+
+        private static string ExtractWhisperZipAssetsRoot(string path)
+        {
+            var normalized = path.Replace('\\', '/').TrimStart('/');
+            var assetsIndex = normalized.IndexOf("/Assets/", StringComparison.OrdinalIgnoreCase);
+            if (assetsIndex >= 0)
+            {
+                return normalized.Substring(0, assetsIndex + "/Assets".Length);
+            }
+
+            if (normalized.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Assets";
+            }
+
+            return normalized;
         }
 
         private static bool TryFindUnityPackage(string rootFolderPath, out string unityPackagePath)

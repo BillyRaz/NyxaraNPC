@@ -22,7 +22,7 @@ The package compiles and the demo scene loads in a clean Unity project without t
 
 These are NOT required for importing the package.
 
-Nyxara Setup Wizard does not download anything or connect to external services. It only copies files or folders that the user manually selects inside Unity into the correct project locations.
+Nyxara Setup Wizard does not download anything or connect to external services. It only copies files, folders, or supported Whisper ZIP files that the user manually selects inside Unity into the correct project locations.
 
 If not installed:
 - AI generation is disabled
@@ -104,10 +104,19 @@ After downloading the optional external tools, use Nyxara Setup Wizard to place 
 2. Browse and install what you want to use:
 
    - LLM `.gguf`
-   - Whisper Unity package folder
+   - Whisper Unity package folder or ZIP
    - Whisper model
    - Piper runtime folder
    - Piper voice `.onnx`
+
+   The Whisper source field accepts either:
+   - an extracted folder containing a supported Whisper package structure
+   - a manually downloaded `.zip` containing a supported Whisper package structure
+
+   Supported Whisper package structures:
+   - `.unitypackage` inside the selected folder or ZIP
+   - `Assets/...`
+   - embedded `package.json` package content, including `Packages/.../package.json`
 
 3. Open:
    Nyxara AI → Studio
@@ -120,7 +129,9 @@ After downloading the optional external tools, use Nyxara Setup Wizard to place 
 Voice output is optional.  
 If Piper is not configured, Nyxara AI Studio will still work using text-based responses.
 
-The wizard only works with files or folders the user manually selects. It does not download anything or connect to external services automatically.
+The wizard only works with files, folders, or supported Whisper ZIP files the user manually selects. It does not download anything or connect to external services automatically.
+
+You can also use `Validate & Bind Installed Integrations` in Setup Wizard to detect existing LLMUnity, whisper.unity, and Piper configuration in the project and repair Nyxara bindings without forcing a reinstall.
 
 ## Unity Packages Used
 

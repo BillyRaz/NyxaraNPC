@@ -23,17 +23,24 @@ Download the optional external systems you want to use:
 Open:
 Nyxara AI → Studio → Setup Wizard
 
-Use the wizard to browse to the files or folders you already downloaded.
+Use the wizard to browse to the files, folders, or supported Whisper ZIP files you already downloaded.
 
 - Select your `.gguf` file for LLM
-- Select your downloaded Whisper integration folder if you want the wizard to import the Whisper Unity package
+- Select your downloaded Whisper integration folder or `.zip` if you want the wizard to import the Whisper Unity package
 - Select your Whisper model file
 - Optionally select your Piper runtime folder
 - Optionally select your Piper voice `.onnx`
 
 Click install for each dependency or use `Install All`.
 
-The wizard only copies files you manually select. It does not download anything or connect to external services.
+The Whisper package source supports:
+- `.unitypackage`
+- `Assets/...`
+- embedded `package.json` package content, including `Packages/.../package.json`
+
+If you already installed integrations manually, you can also use `Validate & Bind Installed Integrations` in Setup Wizard to repair Nyxara bindings without reinstalling.
+
+The wizard only copies files, folders, or supported Whisper ZIP files you manually select. It does not download anything or connect to external services.
 
 ---
 
@@ -101,4 +108,4 @@ Use:
 - Voice output is optional.  
 - If Piper is not configured, Nyxara AI Studio will still work using text-based responses.  
 - If dependencies are not installed, Nyxara AI Studio will still import and run, but AI, speech-to-text, and voice features will remain disabled until configured.
-- Nyxara Setup Wizard does not download or auto-connect to anything outside the Unity project. It only copies files or folders you manually choose.
+- Nyxara Setup Wizard does not download or auto-connect to anything outside the Unity project. It only copies files, folders, or supported Whisper ZIP files you manually choose.
