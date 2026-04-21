@@ -14,17 +14,17 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Nyxara.AICompanion.Studio.AICompanionStudioConfig
   characterName: Nyxara
   studioRootName: NyxaraStudioRoot
-  sourceCharacterPrefab: {fileID: 0}
+  sourceCharacterPrefab: {fileID: 919132149155446097, guid: 4fde7f8b033e0a44a95e3f2282bb68ea, type: 3}
   sourceIsExistingRootPrefab: 0
-  preferredFaceRendererPath: 
+  preferredFaceRendererPath: Nyxara Head.Shape
   playerTransform: {fileID: 0}
-  characterProfile: {fileID: 0}
-  llmModelPath: 
+  characterProfile: {fileID: 11400000, guid: 2f70b1021184d3249834dacef0b63b7b, type: 2}
+  llmModelPath: Models/Qwen2.5-7B-Instruct-1M-Q4_K_M.gguf
   whisperModelRelativePath: Speech/ggml-tiny.bin
-  ttsEnabled: 0
+  ttsEnabled: 1
   hasMigratedLegacyTtsConfiguration: 1
-  piperExecutablePath: 
-  piperVoicePath: 
+  piperExecutablePath: Speech/PiperRuntime/piper/piper.exe
+  piperVoicePath: Speech/PiperVoices/en_US-amy-medium.onnx
   createSceneInstance: 1
   saveRootPrefab: 1
   createProfileIfMissing: 1
@@ -34,6 +34,7 @@ MonoBehaviour:
   createStudioLights: 1
   enableRuntimeConversationOverlay: 1
   showRuntimeConversationOverlay: 1
+  enableSmartVoiceCapture: 1
   runtimeMicHoldKey: 118
   runtimePromptPopupKey: 116
   llmContextSize: 4096
@@ -48,7 +49,7 @@ MonoBehaviour:
   characterLocalPosition: {x: 0, y: 0, z: 0}
   characterLocalEuler: {x: 0, y: 0, z: 0}
   focusHeightOffset: 1.55
-  cameraPivotOffset: {x: 0, y: 0, z: 0}
+  cameraPivotOffset: {x: 0, y: -0.16, z: 0}
   cameraDistance: 1.35
   cameraHeight: 1.6
   cameraYaw: 0

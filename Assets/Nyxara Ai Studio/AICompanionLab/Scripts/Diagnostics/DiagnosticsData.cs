@@ -4,7 +4,6 @@
 
 using System;
 using System.Collections.Generic;
-
 namespace Nyxara.AICompanion.Diagnostics
 {
     [Serializable]
@@ -22,6 +21,7 @@ namespace Nyxara.AICompanion.Diagnostics
         public List<ConfigIssue> configIssues = new();
         public List<PathValidation> pathValidations = new();
         public RuntimeSnapshot runtimeSnapshot = new();
+        public List<DiagnosticFinding> findings = new();
 
         public bool IsHealthy =>
             (!llmStatus.affectsOverallHealth || llmStatus.isOperational) &&
@@ -42,6 +42,8 @@ namespace Nyxara.AICompanion.Diagnostics
         public string lastError;
         public bool affectsOverallHealth = true;
         public string stateLabel;
+        public string recommendedAction;
+        public List<string> details = new();
     }
 
     [Serializable]
@@ -91,6 +93,24 @@ namespace Nyxara.AICompanion.Diagnostics
         public string lastDialogue;
         public float timeSinceLastResponse;
         public int memoryCount;
+        public int savedEventMemoryCount;
+        public int savedRelationshipMemoryCount;
+        public string memoryStorageSummary;
+    }
+
+    [Serializable]
+    public class DiagnosticFinding
+    {
+        public DiagnosticSeverity severity;
+        public string title;
+        public string message;
+    }
+
+    public enum DiagnosticSeverity
+    {
+        Info,
+        Warning,
+        Error
     }
 
     public enum IssueSeverity

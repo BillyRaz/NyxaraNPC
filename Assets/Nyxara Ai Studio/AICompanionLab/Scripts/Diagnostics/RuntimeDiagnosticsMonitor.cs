@@ -184,7 +184,7 @@ namespace Nyxara.AICompanion.Diagnostics
 
         private ComponentStatus CheckSTTStatus()
         {
-            var status = new ComponentStatus { name = "STT (Whisper)" };
+            var status = new ComponentStatus { name = "Player Voice Input (Whisper)" };
             if (whisperInput == null)
             {
                 status.isPresent = false;
@@ -200,6 +200,22 @@ namespace Nyxara.AICompanion.Diagnostics
                 : "Nyxara AI Studio: Whisper not installed or no WhisperManager assigned. Speech-to-text disabled.";
             status.affectsOverallHealth = false;
             status.stateLabel = status.isOperational ? string.Empty : "Optional";
+            status.recommendedAction = whisperInput.GetLikelySpeechIssue();
+            status.details.Add($"Mic devices: {whisperInput.AvailableMicrophones.Length}");
+            status.details.Add($"Resolved mic: {whisperInput.ActiveMicrophoneDevice ?? "<default>"}");
+            status.details.Add($"Mic route: {whisperInput.LastResolvedMicrophoneRoute}");
+            status.details.Add($"Capture mode: {whisperInput.CaptureModeLabel}");
+            status.details.Add($"Capture failure mode: {whisperInput.LastCaptureFailureMode}");
+            status.details.Add($"Last raw STT: {(!string.IsNullOrWhiteSpace(whisperInput.LastRawTranscript) ? whisperInput.LastRawTranscript : "<empty>")}");
+            status.details.Add($"Last normalized STT: {(!string.IsNullOrWhiteSpace(whisperInput.LastNormalizedTranscript) ? whisperInput.LastNormalizedTranscript : "<empty>")}");
+            status.details.Add($"Rejected transcript debug bypass: {(whisperInput.AllowRejectedTranscriptsInDebug ? "enabled" : "disabled")}");
+            status.details.Add($"Music-like transcript bypass: {(whisperInput.AllowMusicLikeTranscriptsInDebug ? "enabled" : "disabled")}");
+            status.details.Add($"Quiet rejection bypass: {(whisperInput.BypassQuietCaptureRejectionInDebug ? "enabled" : "disabled")}");
+            status.details.Add($"Explicit mic selection: {(whisperInput.ForceExplicitMicrophoneSelection ? "enabled" : "disabled")}");
+            status.details.Add($"Speech gate: RMS >= {whisperInput.MinRmsForSpeech:0.0000}, Peak >= {whisperInput.MinPeakForSpeech:0.0000}, PreGain {whisperInput.PreTranscriptionGain:0.00}x");
+            status.details.Add($"Transcript filters: Music {(whisperInput.RejectMusicLikeTranscripts ? "enabled" : "disabled")} | Bracket tags {(whisperInput.RejectBracketedNonSpeechTags ? "enabled" : "disabled")}");
+            status.details.Add($"Last audio stats: {whisperInput.LastRecordingDurationSeconds:0.00}s | RMS {whisperInput.LastRecordingRms:0.0000} | Peak {whisperInput.LastRecordingPeak:0.0000} | Gain {whisperInput.LastAppliedPreampGain:0.00}x");
+            status.details.Add($"Last forwarding decision: {whisperInput.LastForwardingDecision}");
             if (_sttLatencies.Count > 0)
             {
                 status.lastResponseTimeMs = _sttLatencies.Average();
@@ -485,6 +501,28 @@ namespace Nyxara.AICompanion.Diagnostics
                 }
             }
 
+            if (whisperInput != null && whisperInput.AvailableMicrophones.Length == 1)
+            {
+                issues.Add(new ConfigIssue
+                {
+                    severity = IssueSeverity.Info,
+                    component = "STT",
+                    issue = "Unity currently sees only one microphone device",
+                    suggestion = "If voice capture still hears ambience, verify the Windows default input device and microphone privacy settings."
+                });
+            }
+
+            if (whisperInput != null && !string.IsNullOrWhiteSpace(whisperInput.LastRawTranscript))
+            {
+                issues.Add(new ConfigIssue
+                {
+                    severity = IssueSeverity.Info,
+                    component = "STT",
+                    issue = $"Last raw Whisper transcript: {whisperInput.LastRawTranscript}",
+                    suggestion = whisperInput.GetLikelySpeechIssue()
+                });
+            }
+
             return issues;
         }
 
@@ -520,6 +558,9 @@ namespace Nyxara.AICompanion.Diagnostics
             if (memoryController != null)
             {
                 snapshot.memoryCount = memoryController.GetMemoryCount();
+                snapshot.savedEventMemoryCount = memoryController.GetSavedEventCount();
+                snapshot.savedRelationshipMemoryCount = memoryController.GetSavedRelationshipEventCount();
+                snapshot.memoryStorageSummary = memoryController.GetMemoryStorageSummary();
             }
 
             snapshot.timeSinceLastResponse = _lastResponseRealtime <= 0f ? 0f : Time.realtimeSinceStartup - _lastResponseRealtime;

@@ -27,6 +27,8 @@ namespace Nyxara.AICompanion.Editor
         private const string WhisperPackageName = "com.whisper.unity";
         private const string LlmUnityDefine = "NYXARA_LLMUNITY";
         private const string WhisperDefine = "NYXARA_WHISPER";
+        private const string PendingLlmMessage = "LLMUnity package detected, but Unity is still compiling/loading it. Nyxara queued an automatic repair for the AI bindings.";
+        private const string PendingWhisperMessage = "whisper.unity package detected, but Unity is still compiling/loading it. Nyxara queued an automatic repair for the speech bindings.";
 
         internal sealed class ValidationReport
         {
@@ -163,6 +165,13 @@ namespace Nyxara.AICompanion.Editor
             var agentType = ResolveTypeByName("LLMAgent");
             if (!packageDetected || llmType == null || agentType == null)
             {
+                if (packageDetected || HasScriptingDefine(LlmUnityDefine))
+                {
+                    NyxaraCompanionStudioBuilder.QueuePendingIntegrationRepair(config, needsLlmRepair: true, needsWhisperRepair: false);
+                    report.Lines.Add(PendingLlmMessage);
+                    return;
+                }
+
                 var modelFound = TryResolveLlmModelPath(config, out _, out _);
                 report.Lines.Add(modelFound
                     ? "LLM model found but LLMUnity package missing."
@@ -227,6 +236,13 @@ namespace Nyxara.AICompanion.Editor
             var whisperManagerType = ResolveTypeByName("WhisperManager");
             if (!packageDetected || whisperManagerType == null)
             {
+                if (packageDetected || HasScriptingDefine(WhisperDefine))
+                {
+                    NyxaraCompanionStudioBuilder.QueuePendingIntegrationRepair(config, needsLlmRepair: false, needsWhisperRepair: true);
+                    report.Lines.Add(PendingWhisperMessage);
+                    return;
+                }
+
                 var modelFound = TryResolveWhisperModelPath(config, out _, out _);
                 report.Lines.Add(modelFound
                     ? "Whisper model found but whisper.unity package missing."
@@ -380,7 +396,26 @@ namespace Nyxara.AICompanion.Editor
 
             if (TryUseExistingValidPath(config != null ? config.llmModelPath : string.Empty, false, out resolvedPath))
             {
+                var configuredFileName = Path.GetFileName(resolvedPath);
+                if (!string.IsNullOrWhiteSpace(configuredFileName) &&
+                    TryFindFirstFile(Path.Combine(Application.streamingAssetsPath, "Models"), configuredFileName, out var localProjectPath))
+                {
+                    resolvedPath = MakeStreamingAssetsRelative(localProjectPath);
+                    if (config != null)
+                    {
+                        config.llmModelPath = resolvedPath;
+                    }
+
+                    source = "StreamingAssets/Models";
+                    return true;
+                }
+
                 resolvedPath = MakeStreamingAssetsRelative(resolvedPath);
+                if (config != null)
+                {
+                    config.llmModelPath = resolvedPath;
+                }
+
                 source = "config";
                 return true;
             }
@@ -412,7 +447,26 @@ namespace Nyxara.AICompanion.Editor
 
             if (TryUseExistingValidPath(config != null ? config.whisperModelRelativePath : string.Empty, true, out resolvedPath))
             {
+                var configuredFileName = Path.GetFileName(resolvedPath);
+                if (!string.IsNullOrWhiteSpace(configuredFileName) &&
+                    TryFindFirstFile(Path.Combine(Application.streamingAssetsPath, "Speech"), configuredFileName, out var localProjectPath))
+                {
+                    resolvedPath = MakeStreamingAssetsRelative(localProjectPath);
+                    if (config != null)
+                    {
+                        config.whisperModelRelativePath = resolvedPath;
+                    }
+
+                    source = "StreamingAssets/Speech";
+                    return true;
+                }
+
                 resolvedPath = MakeStreamingAssetsRelative(resolvedPath);
+                if (config != null)
+                {
+                    config.whisperModelRelativePath = resolvedPath;
+                }
+
                 source = "config";
                 return true;
             }
@@ -624,6 +678,22 @@ namespace Nyxara.AICompanion.Editor
 
         private static Type ResolveTypeByName(string typeName)
         {
+            foreach (var candidateName in EnumerateCandidateTypeNames(typeName))
+            {
+                var directType = Type.GetType(candidateName, false);
+                if (directType != null)
+                {
+                    return directType;
+                }
+            }
+
+            var cachedType = TypeCache.GetTypesDerivedFrom<Component>()
+                .FirstOrDefault(type => MatchesTypeName(type, typeName));
+            if (cachedType != null)
+            {
+                return cachedType;
+            }
+
             return AppDomain.CurrentDomain
                 .GetAssemblies()
                 .SelectMany(assembly =>
@@ -637,7 +707,45 @@ namespace Nyxara.AICompanion.Editor
                         return ex.Types.Where(type => type != null);
                     }
                 })
-                .FirstOrDefault(type => type != null && string.Equals(type.Name, typeName, StringComparison.Ordinal));
+                .FirstOrDefault(type => type != null && MatchesTypeName(type, typeName));
+        }
+
+        private static IEnumerable<string> EnumerateCandidateTypeNames(string typeName)
+        {
+            if (!string.IsNullOrWhiteSpace(typeName))
+            {
+                yield return typeName;
+            }
+
+            switch (typeName)
+            {
+                case "LLM":
+                    yield return "LLMUnity.LLM";
+                    break;
+                case "LLMAgent":
+                    yield return "LLMUnity.LLMAgent";
+                    break;
+                case "WhisperManager":
+                    yield return "Whisper.WhisperManager";
+                    break;
+            }
+        }
+
+        private static bool MatchesTypeName(Type type, string typeName)
+        {
+            if (type == null || string.IsNullOrWhiteSpace(typeName))
+            {
+                return false;
+            }
+
+            if (string.Equals(type.Name, typeName, StringComparison.Ordinal) ||
+                string.Equals(type.FullName, typeName, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            return EnumerateCandidateTypeNames(typeName)
+                .Any(candidateName => string.Equals(type.FullName, candidateName, StringComparison.Ordinal));
         }
 
         private static List<GameObject> FindNyxaraRoots()

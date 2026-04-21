@@ -24,40 +24,40 @@ namespace Nyxara.AICompanion.Expressions
             Create("browInnerUp", "Brow Inner Up", "browInnerUp", "BrowInnerUp", "Brow_Raise_Inner_L", "Brow_Raise_Inner_R"),
             Create("browDownLeft", "Brow Down Left", "browDownLeft", "BrowDownLeft", "Brow_Drop_L"),
             Create("browDownRight", "Brow Down Right", "browDownRight", "BrowDownRight", "Brow_Drop_R"),
-            Create("eyeBlinkLeft", "Eye Blink Left", "eyeBlinkLeft", "EyeBlinkLeft", "Eye_Blink_L", "Blink_L"),
-            Create("eyeBlinkRight", "Eye Blink Right", "eyeBlinkRight", "EyeBlinkRight", "Eye_Blink_R", "Blink_R"),
-            Create("eyeSquintLeft", "Eye Squint Left", "eyeSquintLeft", "EyeSquintLeft", "Eye_Squint_L"),
-            Create("eyeSquintRight", "Eye Squint Right", "eyeSquintRight", "EyeSquintRight", "Eye_Squint_R"),
-            Create("eyeWideLeft", "Eye Wide Left", "eyeWideLeft", "EyeWideLeft", "Eye_Wide_L"),
-            Create("eyeWideRight", "Eye Wide Right", "eyeWideRight", "EyeWideRight", "Eye_Wide_R"),
+            Create("eyeBlinkLeft", "Eye Blink Left", "eyeBlinkLeft", "EyeBlinkLeft", "Eye_Blink_L", "Blink_L", "Fcl_EYE_Close_L", "Fcl_EYE_Close"),
+            Create("eyeBlinkRight", "Eye Blink Right", "eyeBlinkRight", "EyeBlinkRight", "Eye_Blink_R", "Blink_R", "Fcl_EYE_Close_R", "Fcl_EYE_Close"),
+            Create("eyeSquintLeft", "Eye Squint Left", "eyeSquintLeft", "EyeSquintLeft", "Eye_Squint_L", "Fcl_EYE_Joy_L", "Fcl_EYE_Joy"),
+            Create("eyeSquintRight", "Eye Squint Right", "eyeSquintRight", "EyeSquintRight", "Eye_Squint_R", "Fcl_EYE_Joy_R", "Fcl_EYE_Joy"),
+            Create("eyeWideLeft", "Eye Wide Left", "eyeWideLeft", "EyeWideLeft", "Eye_Wide_L", "Fcl_EYE_Spread", "Fcl_EYE_Surprised"),
+            Create("eyeWideRight", "Eye Wide Right", "eyeWideRight", "EyeWideRight", "Eye_Wide_R", "Fcl_EYE_Spread", "Fcl_EYE_Surprised"),
             Create("cheekPuff", "Cheek Puff", "cheekPuff", "CheekPuff", "Cheek_Puff_L", "Cheek_Puff_R"),
             Create("cheekSquintLeft", "Cheek Squint Left", "cheekSquintLeft", "CheekSquintLeft", "Cheek_Raise_L"),
             Create("cheekSquintRight", "Cheek Squint Right", "cheekSquintRight", "CheekSquintRight", "Cheek_Raise_R"),
             Create("noseSneerLeft", "Nose Sneer Left", "noseSneerLeft", "NoseSneerLeft", "Nose_Sneer_L"),
             Create("noseSneerRight", "Nose Sneer Right", "noseSneerRight", "NoseSneerRight", "Nose_Sneer_R"),
-            Create("jawOpen", "Jaw Open", "jawOpen", "JawOpen", "mouthOpen", "Jaw_Open", "V_Open", "viseme_aa", "viseme_AA", "A"),
+            Create("jawOpen", "Jaw Open", "jawOpen", "JawOpen", "mouthOpen", "Jaw_Open", "V_Open", "viseme_aa", "viseme_AA", "A", "Fcl_MTH_A"),
             Create("jawForward", "Jaw Forward", "jawForward", "JawForward", "Jaw_Forward"),
             Create("jawLeft", "Jaw Left", "jawLeft", "JawLeft", "Jaw_L"),
             Create("jawRight", "Jaw Right", "jawRight", "JawRight", "Jaw_R"),
-            Create("mouthClose", "Mouth Close", "mouthClose", "MouthClose", "Mouth_Close", "viseme_sil", "viseme_PP", "viseme_pp"),
-            Create("mouthFunnel", "Mouth Funnel", "mouthFunnel", "MouthFunnel", "Mouth_Funnel_Up_L", "Mouth_Funnel_Up_R", "Mouth_Funnel_Down_L", "Mouth_Funnel_Down_R", "O", "viseme_O"),
-            Create("mouthPucker", "Mouth Pucker", "mouthPucker", "MouthPucker", "Mouth_Pucker_Up_L", "Mouth_Pucker_Up_R", "Mouth_Pucker_Down_L", "Mouth_Pucker_Down_R", "U", "viseme_U", "viseme_ou"),
+            Create("mouthClose", "Mouth Close", "mouthClose", "MouthClose", "Mouth_Close", "viseme_sil", "viseme_PP", "viseme_pp", "Fcl_MTH_Close"),
+            Create("mouthFunnel", "Mouth Funnel", "mouthFunnel", "MouthFunnel", "Mouth_Funnel_Up_L", "Mouth_Funnel_Up_R", "Mouth_Funnel_Down_L", "Mouth_Funnel_Down_R", "O", "viseme_O", "Fcl_MTH_O", "Fcl_MTH_U"),
+            Create("mouthPucker", "Mouth Pucker", "mouthPucker", "MouthPucker", "Mouth_Pucker_Up_L", "Mouth_Pucker_Up_R", "Mouth_Pucker_Down_L", "Mouth_Pucker_Down_R", "U", "viseme_U", "viseme_ou", "Fcl_MTH_U", "Fcl_MTH_O"),
             Create("mouthLeft", "Mouth Left", "mouthLeft", "MouthLeft", "Mouth_L"),
             Create("mouthRight", "Mouth Right", "mouthRight", "MouthRight", "Mouth_R"),
-            Create("mouthSmileLeft", "Smile Left", "mouthSmileLeft", "mouthSmile_L", "SmileLeft", "Mouth_Smile_L", "Mouth_Smile_Sharp_L"),
-            Create("mouthSmileRight", "Smile Right", "mouthSmileRight", "mouthSmile_R", "SmileRight", "Mouth_Smile_R", "Mouth_Smile_Sharp_R"),
+            Create("mouthSmileLeft", "Smile Left", "mouthSmileLeft", "mouthSmile_L", "SmileLeft", "Mouth_Smile_L", "Mouth_Smile_Sharp_L", "Fcl_MTH_E", "Fcl_MTH_I", "Fcl_MTH_A"),
+            Create("mouthSmileRight", "Smile Right", "mouthSmileRight", "mouthSmile_R", "SmileRight", "Mouth_Smile_R", "Mouth_Smile_Sharp_R", "Fcl_MTH_E", "Fcl_MTH_I", "Fcl_MTH_A"),
             Create("mouthFrownLeft", "Frown Left", "mouthFrownLeft", "mouthFrown_L", "FrownLeft", "Mouth_Frown_L"),
             Create("mouthFrownRight", "Frown Right", "mouthFrownRight", "mouthFrown_R", "FrownRight", "Mouth_Frown_R"),
             Create("mouthDimpleLeft", "Dimple Left", "mouthDimpleLeft", "mouthDimple_L", "DimpleLeft", "Mouth_Dimple_L"),
             Create("mouthDimpleRight", "Dimple Right", "mouthDimpleRight", "mouthDimple_R", "DimpleRight", "Mouth_Dimple_R"),
-            Create("mouthStretchLeft", "Mouth Stretch Left", "mouthStretchLeft", "mouthStretch_L", "StretchLeft", "Mouth_Stretch_L", "viseme_I", "viseme_E"),
-            Create("mouthStretchRight", "Mouth Stretch Right", "mouthStretchRight", "mouthStretch_R", "StretchRight", "Mouth_Stretch_R", "viseme_I", "viseme_E"),
+            Create("mouthStretchLeft", "Mouth Stretch Left", "mouthStretchLeft", "mouthStretch_L", "StretchLeft", "Mouth_Stretch_L", "viseme_I", "viseme_E", "Fcl_MTH_I", "Fcl_MTH_E"),
+            Create("mouthStretchRight", "Mouth Stretch Right", "mouthStretchRight", "mouthStretch_R", "StretchRight", "Mouth_Stretch_R", "viseme_I", "viseme_E", "Fcl_MTH_I", "Fcl_MTH_E"),
             Create("mouthPressLeft", "Mouth Press Left", "mouthPressLeft", "mouthPress_L", "MouthPressLeft", "Mouth_Press_L"),
             Create("mouthPressRight", "Mouth Press Right", "mouthPressRight", "mouthPress_R", "MouthPressRight", "Mouth_Press_R"),
-            Create("mouthLowerDownLeft", "Lower Down Left", "mouthLowerDownLeft", "mouthLowerDown_L", "MouthLowerDownLeft", "Mouth_Down_Lower_L"),
-            Create("mouthLowerDownRight", "Lower Down Right", "mouthLowerDownRight", "mouthLowerDown_R", "MouthLowerDownRight", "Mouth_Down_Lower_R"),
-            Create("mouthUpperUpLeft", "Upper Up Left", "mouthUpperUpLeft", "mouthUpperUp_L", "MouthUpperUpLeft", "Mouth_Up_Upper_L"),
-            Create("mouthUpperUpRight", "Upper Up Right", "mouthUpperUpRight", "mouthUpperUp_R", "MouthUpperUpRight", "Mouth_Up_Upper_R"),
+            Create("mouthLowerDownLeft", "Lower Down Left", "mouthLowerDownLeft", "mouthLowerDown_L", "MouthLowerDownLeft", "Mouth_Down_Lower_L", "Fcl_MTH_A"),
+            Create("mouthLowerDownRight", "Lower Down Right", "mouthLowerDownRight", "mouthLowerDown_R", "MouthLowerDownRight", "Mouth_Down_Lower_R", "Fcl_MTH_A"),
+            Create("mouthUpperUpLeft", "Upper Up Left", "mouthUpperUpLeft", "mouthUpperUp_L", "MouthUpperUpLeft", "Mouth_Up_Upper_L", "Fcl_MTH_A"),
+            Create("mouthUpperUpRight", "Upper Up Right", "mouthUpperUpRight", "mouthUpperUp_R", "MouthUpperUpRight", "Mouth_Up_Upper_R", "Fcl_MTH_A"),
             Create("mouthRollUpper", "Roll Upper Lip", "mouthRollUpper", "MouthRollUpper", "Mouth_Roll_In_Upper_L", "Mouth_Roll_In_Upper_R", "Mouth_Roll_Out_Upper_L", "Mouth_Roll_Out_Upper_R"),
             Create("mouthRollLower", "Roll Lower Lip", "mouthRollLower", "MouthRollLower", "Mouth_Roll_In_Lower_L", "Mouth_Roll_In_Lower_R", "Mouth_Roll_Out_Lower_L", "Mouth_Roll_Out_Lower_R"),
             Create("mouthShrugUpper", "Shrug Upper Lip", "mouthShrugUpper", "MouthShrugUpper", "Mouth_Shrug_Upper"),
@@ -78,6 +78,12 @@ namespace Nyxara.AICompanion.Expressions
             if (normalized.Contains("jawopen") && normalized.Contains("mouthsmileleft") && normalized.Contains("eyeblinkleft"))
             {
                 profiles.Add("ARKit");
+            }
+
+            if ((normalized.Contains("fcleyeclose") || (normalized.Contains("fcleyeclosel") && normalized.Contains("fcleyecloser"))) &&
+                (normalized.Contains("fclmtha") || normalized.Contains("fclmtho") || normalized.Contains("fclmthu") || normalized.Contains("fclmthclose")))
+            {
+                profiles.Add("VRM");
             }
 
             if (normalized.Contains("jawopen") && normalized.Contains("mouthsmilel") && normalized.Contains("mouthclose"))
@@ -328,9 +334,13 @@ namespace Nyxara.AICompanion.Expressions
             var presetLookup = preset.blendshapeWeights.ToDictionary(weight => weight.blendshapeName, weight => weight.weight, StringComparer.OrdinalIgnoreCase);
             foreach (var control in DefaultControls)
             {
-                if (controlToBlendshapeMap.TryGetValue(control.key, out var blendshapeName) &&
-                    !string.IsNullOrWhiteSpace(blendshapeName) &&
-                    presetLookup.TryGetValue(blendshapeName, out var weight))
+                if (!controlToBlendshapeMap.TryGetValue(control.key, out var blendshapeName) ||
+                    string.IsNullOrWhiteSpace(blendshapeName))
+                {
+                    continue;
+                }
+
+                if (TryResolvePresetWeight(presetLookup, blendshapeName, control.candidateBlendshapeNames, out var weight))
                 {
                     result[control.key] = weight;
                 }
@@ -379,6 +389,36 @@ namespace Nyxara.AICompanion.Expressions
             return string.IsNullOrWhiteSpace(value)
                 ? string.Empty
                 : value.Replace("_", string.Empty).Replace("-", string.Empty).Replace(" ", string.Empty);
+        }
+
+        private static bool TryResolvePresetWeight(
+            IReadOnlyDictionary<string, float> presetLookup,
+            string selectedBlendshapeName,
+            IReadOnlyList<string> candidateBlendshapeNames,
+            out float weight)
+        {
+            weight = 0f;
+            if (presetLookup == null)
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(selectedBlendshapeName) &&
+                presetLookup.TryGetValue(selectedBlendshapeName, out weight))
+            {
+                return true;
+            }
+
+            foreach (var candidate in candidateBlendshapeNames ?? Array.Empty<string>())
+            {
+                if (!string.IsNullOrWhiteSpace(candidate) &&
+                    presetLookup.TryGetValue(candidate, out weight))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }

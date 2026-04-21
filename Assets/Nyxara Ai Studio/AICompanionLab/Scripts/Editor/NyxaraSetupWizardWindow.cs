@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Nyxara.AICompanion.Configuration;
 using Nyxara.AICompanion.LipSync;
 using Nyxara.AICompanion.Speech;
@@ -36,6 +37,8 @@ namespace Nyxara.AICompanion.Editor
         private string _piperRuntimeFolderPath = string.Empty;
         private string _piperVoiceSourcePath = string.Empty;
         private string _installSummary = string.Empty;
+        private string _cachedWhisperImportPreviewPath = string.Empty;
+        private string _cachedWhisperImportPreview = "No Whisper package folder or ZIP selected";
         private MessageType _installSummaryType = MessageType.Info;
 
         [MenuItem("Nyxara AI/Setup Wizard", false, 2)]
@@ -71,6 +74,7 @@ namespace Nyxara.AICompanion.Editor
                 return;
             }
 
+            RefreshWhisperImportPreviewIfNeeded();
             _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition);
             try
             {
@@ -143,9 +147,9 @@ namespace Nyxara.AICompanion.Editor
             try
             {
                 EditorGUILayout.LabelField("2. Speech To Text (Whisper)", EditorStyles.boldLabel);
-                EditorGUILayout.HelpBox("You can install the Whisper Unity integration from a downloaded folder or ZIP and optionally copy a Whisper model into StreamingAssets/Speech. Sample/demo folders are skipped to avoid bringing broken example scripts into the project.", MessageType.None);
+                EditorGUILayout.HelpBox("Install the Whisper Unity package from a downloaded folder or ZIP, then optionally copy a Whisper model into StreamingAssets/Speech. When a package.json package is found, the wizard now installs it into the project's Packages folder first so Unity resolves it correctly.", MessageType.None);
                 DrawFolderOrZipPicker("Whisper Package Folder or ZIP", ref _whisperIntegrationFolderPath, "Select Whisper Package Folder", "Select Whisper ZIP");
-                EditorGUILayout.LabelField("Package Action", string.IsNullOrWhiteSpace(_whisperIntegrationFolderPath) ? "No Whisper package folder or ZIP selected" : DescribeWhisperImportTarget(_whisperIntegrationFolderPath));
+                EditorGUILayout.LabelField("Package Action", _cachedWhisperImportPreview);
 
                 EditorGUILayout.Space(4f);
                 DrawFilePicker("Source Model", ref _whisperSourcePath, "bin", "Select Whisper Model");
@@ -274,39 +278,31 @@ namespace Nyxara.AICompanion.Editor
         {
             EditorGUILayout.BeginHorizontal();
             value = EditorGUILayout.TextField(label, value);
-            if (GUILayout.Button("Browse", GUILayout.Width(90f)))
+            var startDirectory = GetSafeBrowseDirectory(value);
+            if (GUILayout.Button("Folder", GUILayout.Width(72f)))
             {
-                var currentValue = value;
-                var browseMenu = new GenericMenu();
-                browseMenu.AddItem(new GUIContent("Folder..."), false, () =>
+                var selected = EditorUtility.OpenFolderPanel(folderTitle, startDirectory, string.Empty);
+                if (!string.IsNullOrWhiteSpace(selected))
                 {
-                    var startDirectory = GetSafeBrowseDirectory(currentValue);
-                    var selected = EditorUtility.OpenFolderPanel(folderTitle, startDirectory, string.Empty);
-                    if (!string.IsNullOrWhiteSpace(selected))
-                    {
-                        EditorApplication.delayCall += () => SessionState.SetString($"{SessionKeyPrefix}PendingFolderOrZipSelection", selected.Replace('\\', '/'));
-                    }
-                });
-                browseMenu.AddItem(new GUIContent("ZIP..."), false, () =>
-                {
-                    var startDirectory = GetSafeBrowseDirectory(currentValue);
-                    var selected = EditorUtility.OpenFilePanel(zipTitle, startDirectory, "zip");
-                    if (!string.IsNullOrWhiteSpace(selected))
-                    {
-                        EditorApplication.delayCall += () => SessionState.SetString($"{SessionKeyPrefix}PendingFolderOrZipSelection", selected.Replace('\\', '/'));
-                    }
-                });
-                browseMenu.ShowAsContext();
+                    value = selected.Replace('\\', '/');
+                }
             }
-            EditorGUILayout.EndHorizontal();
 
-            var pendingSelectionKey = $"{SessionKeyPrefix}PendingFolderOrZipSelection";
-            var pendingSelection = SessionState.GetString(pendingSelectionKey, string.Empty);
-            if (!string.IsNullOrWhiteSpace(pendingSelection))
+            if (GUILayout.Button("ZIP", GUILayout.Width(72f)))
             {
-                value = pendingSelection;
-                SessionState.EraseString(pendingSelectionKey);
+                var selected = EditorUtility.OpenFilePanel(zipTitle, startDirectory, "zip");
+                if (!string.IsNullOrWhiteSpace(selected))
+                {
+                    value = selected.Replace('\\', '/');
+                }
             }
+
+            if (GUILayout.Button("Clear", GUILayout.Width(72f)))
+            {
+                value = string.Empty;
+            }
+
+            EditorGUILayout.EndHorizontal();
         }
 
         private void InstallAllSelected()
@@ -421,6 +417,18 @@ namespace Nyxara.AICompanion.Editor
 
             try
             {
+                if (TryFindEmbeddedPackageFolder(packageFolderPath, out var embeddedPackageFolderPath))
+                {
+                    var destinationFolder = GetEmbeddedPackageDestinationPath(embeddedPackageFolderPath);
+                    CopyDirectoryContents(embeddedPackageFolderPath, destinationFolder, ShouldSkipWhisperImportRelativePath);
+                    AssetDatabase.Refresh();
+                    var message = string.IsNullOrWhiteSpace(sourceMessage)
+                        ? $"Nyxara AI Studio: Imported Whisper package from {embeddedPackageFolderPath.Replace('\\', '/')} into {destinationFolder.Replace('\\', '/')} without sample/demo folders."
+                        : $"Nyxara AI Studio: {sourceMessage} Imported Whisper package from {embeddedPackageFolderPath.Replace('\\', '/')} into {destinationFolder.Replace('\\', '/')} without sample/demo folders.";
+                    SetSummary(message, MessageType.Info);
+                    return message;
+                }
+
                 if (TryFindAssetsFolder(packageFolderPath, out var assetsFolderPath))
                 {
                     CopyDirectoryContents(assetsFolderPath, Application.dataPath, ShouldSkipWhisperImportRelativePath);
@@ -428,18 +436,6 @@ namespace Nyxara.AICompanion.Editor
                     var message = string.IsNullOrWhiteSpace(sourceMessage)
                         ? $"Nyxara AI Studio: Imported Whisper assets from {assetsFolderPath.Replace('\\', '/')} into the Unity project without sample/demo folders."
                         : $"Nyxara AI Studio: {sourceMessage} Imported Whisper assets from {assetsFolderPath.Replace('\\', '/')} into the Unity project without sample/demo folders.";
-                    SetSummary(message, MessageType.Info);
-                    return message;
-                }
-
-                if (TryFindEmbeddedPackageFolder(packageFolderPath, out var embeddedPackageFolderPath))
-                {
-                    var destinationFolder = Path.Combine(Directory.GetParent(Application.dataPath)?.FullName ?? Path.GetFullPath(Path.Combine(Application.dataPath, "..")), "Packages", GetSafeFileName(embeddedPackageFolderPath));
-                    CopyDirectoryContents(embeddedPackageFolderPath, destinationFolder, ShouldSkipWhisperImportRelativePath);
-                    AssetDatabase.Refresh();
-                    var message = string.IsNullOrWhiteSpace(sourceMessage)
-                        ? $"Nyxara AI Studio: Imported Whisper embedded package from {embeddedPackageFolderPath.Replace('\\', '/')} into Packages/{GetSafeFileName(embeddedPackageFolderPath)} without sample/demo folders."
-                        : $"Nyxara AI Studio: {sourceMessage} Imported Whisper embedded package from {embeddedPackageFolderPath.Replace('\\', '/')} into Packages/{GetSafeFileName(embeddedPackageFolderPath)} without sample/demo folders.";
                     SetSummary(message, MessageType.Info);
                     return message;
                 }
@@ -846,9 +842,9 @@ namespace Nyxara.AICompanion.Editor
                     return "Selected folder or ZIP not found";
                 }
 
-                if (TryFindUnityPackage(fullPath, out var unityPackagePath))
+                if (TryFindEmbeddedPackageFolder(fullPath, out var embeddedPackageFolderPath))
                 {
-                    return $"Will import Unity package: {unityPackagePath.Replace('\\', '/')}";
+                    return $"Will copy package into project Packages/{GetEmbeddedPackageFolderName(embeddedPackageFolderPath)}";
                 }
 
                 if (TryFindAssetsFolder(fullPath, out var assetsFolderPath))
@@ -856,9 +852,9 @@ namespace Nyxara.AICompanion.Editor
                     return $"Will copy Assets folder into project: {assetsFolderPath.Replace('\\', '/')}";
                 }
 
-                if (TryFindEmbeddedPackageFolder(fullPath, out var embeddedPackageFolderPath))
+                if (TryFindUnityPackage(fullPath, out var unityPackagePath))
                 {
-                    return $"Will copy embedded package into project Packages: {embeddedPackageFolderPath.Replace('\\', '/')}";
+                    return $"Will import Unity package: {unityPackagePath.Replace('\\', '/')}";
                 }
 
                 return "No importable Whisper package content found yet";
@@ -1110,6 +1106,55 @@ namespace Nyxara.AICompanion.Editor
                 .Select(Path.GetDirectoryName)
                 .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path));
             return !string.IsNullOrWhiteSpace(packageFolderPath);
+        }
+
+        private void RefreshWhisperImportPreviewIfNeeded()
+        {
+            var currentPath = _whisperIntegrationFolderPath ?? string.Empty;
+            if (string.Equals(_cachedWhisperImportPreviewPath, currentPath, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _cachedWhisperImportPreviewPath = currentPath;
+            _cachedWhisperImportPreview = string.IsNullOrWhiteSpace(currentPath)
+                ? "No Whisper package folder or ZIP selected"
+                : DescribeWhisperImportTarget(currentPath);
+        }
+
+        private static string GetEmbeddedPackageDestinationPath(string embeddedPackageFolderPath)
+        {
+            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName ?? Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            return Path.Combine(projectRoot, "Packages", GetEmbeddedPackageFolderName(embeddedPackageFolderPath));
+        }
+
+        private static string GetEmbeddedPackageFolderName(string embeddedPackageFolderPath)
+        {
+            if (!string.IsNullOrWhiteSpace(embeddedPackageFolderPath))
+            {
+                var packageJsonPath = Path.Combine(embeddedPackageFolderPath, "package.json");
+                if (File.Exists(packageJsonPath))
+                {
+                    try
+                    {
+                        var packageJson = File.ReadAllText(packageJsonPath);
+                        var nameMatch = Regex.Match(packageJson, "\"name\"\\s*:\\s*\"([^\"]+)\"", RegexOptions.IgnoreCase);
+                        if (nameMatch.Success)
+                        {
+                            var packageName = nameMatch.Groups[1].Value.Trim();
+                            if (!string.IsNullOrWhiteSpace(packageName))
+                            {
+                                return packageName;
+                            }
+                        }
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
+            }
+
+            return GetSafeFileName(embeddedPackageFolderPath);
         }
 
         private static bool ShouldSkipWhisperImportRelativePath(string relativePath)

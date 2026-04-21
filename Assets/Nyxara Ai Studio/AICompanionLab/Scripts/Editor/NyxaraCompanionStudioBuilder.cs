@@ -28,9 +28,19 @@ namespace Nyxara.AICompanion.Editor
     {
         private const string DefaultStudioRootFolder = "Assets/Nyxara AI Studio";
         private const string DefaultGeneratedFolder = DefaultStudioRootFolder + "/Generated";
+        private const string LlmUnityPackageName = "ai.undream.llm";
+        private const string WhisperPackageName = "com.whisper.unity";
         private const string MissingLlmMessage = "Nyxara AI Studio: LLMUnity not installed. AI features disabled.";
         private const string MissingWhisperMessage = "Nyxara AI Studio: Whisper not installed. Speech-to-text features disabled.";
         private const string MissingUrpMessage = "Nyxara AI Studio: Universal Render Pipeline not installed. Using built-in camera and light setup.";
+        private const string PendingLlmMessage = "Nyxara AI Studio: LLMUnity package detected, but Unity is still compiling/loading it. Nyxara will repair AI bindings automatically once scripts finish reloading.";
+        private const string PendingWhisperMessage = "Nyxara AI Studio: Whisper package detected, but Unity is still compiling/loading it. Nyxara will repair speech bindings automatically once scripts finish reloading.";
+        private const string PendingRepairConfigPathKey = "NyxaraStudio.PendingRepair.ConfigPath";
+        private const string PendingRepairLlmKey = "NyxaraStudio.PendingRepair.LLM";
+        private const string PendingRepairWhisperKey = "NyxaraStudio.PendingRepair.Whisper";
+
+        private static string _activeBuildConfigPath;
+        private static bool _pendingRepairUpdateHookInstalled;
 
         private enum OptionalIntegration
         {
@@ -51,6 +61,11 @@ namespace Nyxara.AICompanion.Editor
 
         public static CharacterProfileData EnsureCharacterProfile(AICompanionStudioConfig config)
         {
+            if (config == null)
+            {
+                return null;
+            }
+
             if (config.characterProfile != null)
             {
                 return config.characterProfile;
@@ -61,14 +76,20 @@ namespace Nyxara.AICompanion.Editor
                 return null;
             }
 
+            EnsureAssetFolderPath(string.IsNullOrWhiteSpace(config.rootFolder) ? DefaultStudioRootFolder : config.rootFolder);
+            EnsureAssetFolderPath(config.generatedFolder);
+            EnsureAssetFolderPath(config.profileFolder);
+
             var assetPath = $"{config.profileFolder}/{config.characterName}Profile.asset";
             var profile = AssetDatabase.LoadAssetAtPath<CharacterProfileData>(assetPath);
             if (profile == null)
             {
                 profile = ScriptableObject.CreateInstance<CharacterProfileData>();
                 profile.characterName = config.characterName;
+                profile.name = $"{config.characterName}Profile";
                 AssetDatabase.CreateAsset(profile, assetPath);
                 AssetDatabase.SaveAssets();
+                AssetDatabase.Refresh();
             }
 
             config.characterProfile = profile;
@@ -78,105 +99,134 @@ namespace Nyxara.AICompanion.Editor
 
         public static GameObject BuildStudioRoot(AICompanionStudioConfig config)
         {
+            _activeBuildConfigPath = AssetDatabase.GetAssetPath(config);
             EnsureFolderStructure(config);
             var profile = EnsureCharacterProfile(config);
             RemoveExistingStudioRoot(config.studioRootName);
 
-            var root = CreateRootFromSource(config, out var characterRoot, out var characterInstance);
-            if (root == null)
+            try
             {
+                var root = CreateRootFromSource(config, out var characterRoot, out var characterInstance);
+                if (root == null)
+                {
+                    return null;
+                }
+
+                var systemsRoot = GetOrCreateChild(root.transform, "AISystems");
+
+                var llmObject = GetOrCreateChild(systemsRoot.transform, "Local LLM");
+                var llm = GetOrAddOptionalComponent(llmObject, "LLM", OptionalIntegration.LlmUnity);
+                if (llm != null)
+                {
+                    AssignStringField(llm, "model", ResolveModelPathForLlm(config));
+                    AssignStringField(llm, "_model", ResolveModelPathForLlm(config));
+                    AssignIntField(llm, "contextSize", config.llmContextSize);
+                    AssignIntField(llm, "_contextSize", config.llmContextSize);
+                    AssignIntField(llm, "numThreads", config.llmNumThreads);
+                    AssignIntField(llm, "_numThreads", config.llmNumThreads);
+                    AssignIntField(llm, "numGPULayers", 0);
+                    AssignIntField(llm, "_numGPULayers", 0);
+                }
+
+                var sttObject = GetOrCreateChild(systemsRoot.transform, "Speech To Text");
+                var whisperManager = GetOrAddOptionalComponent(sttObject, "WhisperManager", OptionalIntegration.Whisper);
+                if (whisperManager != null)
+                {
+                    AssignStringField(whisperManager, "ModelPath", config.whisperModelRelativePath);
+                    AssignBoolField(whisperManager, "IsModelPathInStreamingAssets", true);
+                }
+
+                var speechObject = GetOrCreateChild(systemsRoot.transform, "Speech Synthesis");
+                var audioSource = GetOrAddComponent<AudioSource>(speechObject);
+                var tts = GetOrAddComponent<PiperTtsService>(speechObject);
+                tts.TtsEnabled = config.ttsEnabled;
+                tts.PiperExecutablePath = config.piperExecutablePath;
+                tts.VoiceModelPath = config.piperVoicePath;
+                AssignObjectReference(tts, "audioSource", audioSource);
+
+                var agent = GetOrAddOptionalComponent(root, "LLMAgent", OptionalIntegration.LlmUnity);
+                if (agent != null)
+                {
+                    AssignObjectReference(agent, "llm", llm);
+                    AssignObjectReference(agent, "_llm", llm);
+                    AssignStringField(agent, "systemPrompt", "You are Nyxara, a concise, expressive companion. Respond briefly, naturally, and follow the requested output format exactly.");
+                    AssignStringField(agent, "_systemPrompt", "You are Nyxara, a concise, expressive companion. Respond briefly, naturally, and follow the requested output format exactly.");
+                    AssignFloatField(agent, "temperature", config.llmTemperature);
+                    AssignFloatField(agent, "topP", config.llmTopP);
+                    AssignIntField(agent, "topK", config.llmTopK);
+                    AssignFloatField(agent, "minP", config.llmMinP);
+                    AssignFloatField(agent, "repeatPenalty", config.llmRepeatPenalty);
+                    AssignIntField(agent, "numPredict", config.llmNumPredict);
+                    AssignBoolField(agent, "cachePrompt", config.llmCachePrompt);
+                }
+
+                var brain = GetOrAddComponent<NyxaraCompanionBrain>(root);
+                var faceDriver = GetOrAddComponent<ArkItBlendshapeDriver>(root);
+                var signalRouter = GetOrAddComponent<ExpressionSignalRouter>(root);
+                var expressionLibrary = GetOrAddComponent<ExpressionLibraryManager>(root);
+                var expressionTriggerPlayer = GetOrAddComponent<ExpressionTriggerPlayer>(root);
+                var memoryController = GetOrAddComponent<RecentMemoryController>(root);
+                var actionGatekeeper = GetOrAddComponent<ActionGatekeeper>(root);
+                var actionExecutor = GetOrAddComponent<CompanionActionExecutor>(root);
+                var lipSyncController = GetOrAddComponent<VisemeLipSyncController>(root);
+                var phonemeExtractor = GetOrAddComponent<PiperTTSPhonemeExtractor>(root);
+                var microphoneInput = GetOrAddComponent<WhisperMicrophoneInput>(sttObject);
+
+                if (config.autoAttachBootstrap)
+                {
+                    GetOrAddComponent<CompanionBootstrap>(root);
+                }
+
+                RefreshPreferredFaceRendererPath(config, characterInstance);
+                var faceRenderer = ResolveFaceRenderer(config, characterInstance);
+                if (config.createStudioEnvironment)
+                {
+                    CreateStudioEnvironment(config, root, characterRoot.transform, faceRenderer);
+                }
+
+                ConfigureRootSystems(config, root, characterInstance, profile);
+                RepairDetectedIntegrations(config, root);
+
+                if (config.saveRootPrefab)
+                {
+                    var prefabPath = $"{config.prefabFolder}/{config.characterName}_StudioRoot.prefab";
+                    PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
+                }
+
+                if (config.createSceneInstance)
+                {
+                    Selection.activeGameObject = root;
+                    EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+                    return root;
+                }
+
+                UnityEngine.Object.DestroyImmediate(root);
+                AssetDatabase.Refresh();
                 return null;
             }
-
-            var systemsRoot = GetOrCreateChild(root.transform, "AISystems");
-
-            var llmObject = GetOrCreateChild(systemsRoot.transform, "Local LLM");
-            var llm = GetOrAddOptionalComponent(llmObject, "LLM", OptionalIntegration.LlmUnity);
-            if (llm != null)
+            finally
             {
-                AssignStringField(llm, "model", ResolveModelPathForLlm(config));
-                AssignStringField(llm, "_model", ResolveModelPathForLlm(config));
-                AssignIntField(llm, "contextSize", config.llmContextSize);
-                AssignIntField(llm, "_contextSize", config.llmContextSize);
-                AssignIntField(llm, "numThreads", config.llmNumThreads);
-                AssignIntField(llm, "_numThreads", config.llmNumThreads);
-                AssignIntField(llm, "numGPULayers", 0);
-                AssignIntField(llm, "_numGPULayers", 0);
+                _activeBuildConfigPath = null;
+            }
+        }
+
+        private static void RepairDetectedIntegrations(AICompanionStudioConfig config, GameObject root)
+        {
+            if (config == null || root == null)
+            {
+                return;
             }
 
-            var sttObject = GetOrCreateChild(systemsRoot.transform, "Speech To Text");
-            var whisperManager = GetOrAddOptionalComponent(sttObject, "WhisperManager", OptionalIntegration.Whisper);
-            if (whisperManager != null)
+            var report = NyxaraIntegrationValidator.ValidateAndBind(config);
+            if (!report.HasChanges)
             {
-                AssignStringField(whisperManager, "ModelPath", config.whisperModelRelativePath);
-                AssignBoolField(whisperManager, "IsModelPathInStreamingAssets", true);
+                return;
             }
 
-            var speechObject = GetOrCreateChild(systemsRoot.transform, "Speech Synthesis");
-            var audioSource = GetOrAddComponent<AudioSource>(speechObject);
-            var tts = GetOrAddComponent<PiperTtsService>(speechObject);
-            tts.TtsEnabled = config.ttsEnabled;
-            tts.PiperExecutablePath = config.piperExecutablePath;
-            tts.VoiceModelPath = config.piperVoicePath;
-            AssignObjectReference(tts, "audioSource", audioSource);
-
-            var agent = GetOrAddOptionalComponent(root, "LLMAgent", OptionalIntegration.LlmUnity);
-            if (agent != null)
-            {
-                AssignObjectReference(agent, "llm", llm);
-                AssignObjectReference(agent, "_llm", llm);
-                AssignStringField(agent, "systemPrompt", "You are Nyxara, a concise, expressive companion. Respond briefly, naturally, and follow the requested output format exactly.");
-                AssignStringField(agent, "_systemPrompt", "You are Nyxara, a concise, expressive companion. Respond briefly, naturally, and follow the requested output format exactly.");
-                AssignFloatField(agent, "temperature", config.llmTemperature);
-                AssignFloatField(agent, "topP", config.llmTopP);
-                AssignIntField(agent, "topK", config.llmTopK);
-                AssignFloatField(agent, "minP", config.llmMinP);
-                AssignFloatField(agent, "repeatPenalty", config.llmRepeatPenalty);
-                AssignIntField(agent, "numPredict", config.llmNumPredict);
-                AssignBoolField(agent, "cachePrompt", config.llmCachePrompt);
-            }
-
-            var brain = GetOrAddComponent<NyxaraCompanionBrain>(root);
-            var faceDriver = GetOrAddComponent<ArkItBlendshapeDriver>(root);
-            var signalRouter = GetOrAddComponent<ExpressionSignalRouter>(root);
-            var expressionLibrary = GetOrAddComponent<ExpressionLibraryManager>(root);
-            var memoryController = GetOrAddComponent<RecentMemoryController>(root);
-            var actionGatekeeper = GetOrAddComponent<ActionGatekeeper>(root);
-            var actionExecutor = GetOrAddComponent<CompanionActionExecutor>(root);
-            var lipSyncController = GetOrAddComponent<VisemeLipSyncController>(root);
-            var phonemeExtractor = GetOrAddComponent<PiperTTSPhonemeExtractor>(root);
-            var microphoneInput = GetOrAddComponent<WhisperMicrophoneInput>(sttObject);
-
-            if (config.autoAttachBootstrap)
-            {
-                GetOrAddComponent<CompanionBootstrap>(root);
-            }
-
-            RefreshPreferredFaceRendererPath(config, characterInstance);
-            var faceRenderer = ResolveFaceRenderer(config, characterInstance);
-            if (config.createStudioEnvironment)
-            {
-                CreateStudioEnvironment(config, root, characterRoot.transform, faceRenderer);
-            }
-
-            ConfigureRootSystems(config, root, characterInstance, profile);
-
-            if (config.saveRootPrefab)
-            {
-                var prefabPath = $"{config.prefabFolder}/{config.characterName}_StudioRoot.prefab";
-                PrefabUtility.SaveAsPrefabAsset(root, prefabPath);
-            }
-
-            if (config.createSceneInstance)
-            {
-                Selection.activeGameObject = root;
-                EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
-                return root;
-            }
-
-            UnityEngine.Object.DestroyImmediate(root);
-            AssetDatabase.Refresh();
-            return null;
+            EditorUtility.SetDirty(config);
+            EditorUtility.SetDirty(root);
+            AssetDatabase.SaveAssets();
+            EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
         }
 
         public static GameObject FinalizeCompanionRoot(AICompanionStudioConfig config, GameObject root)
@@ -510,6 +560,7 @@ namespace Nyxara.AICompanion.Editor
             var faceDriver = root.GetComponent<ArkItBlendshapeDriver>();
             var signalRouter = root.GetComponent<ExpressionSignalRouter>();
             var expressionLibrary = root.GetComponent<ExpressionLibraryManager>();
+            var expressionTriggerPlayer = root.GetComponent<ExpressionTriggerPlayer>() ?? GetOrAddComponent<ExpressionTriggerPlayer>(root);
             var lipSyncController = root.GetComponent<VisemeLipSyncController>();
             var phonemeExtractor = root.GetComponent<PiperTTSPhonemeExtractor>();
             var runtimeOverlay = root.GetComponent<RuntimeConversationOverlay>() ?? GetOrAddComponent<RuntimeConversationOverlay>(root);
@@ -562,6 +613,13 @@ namespace Nyxara.AICompanion.Editor
                 AssignObjectReferenceList(expressionLibrary, "additionalFaceRenderers", additionalFaceRenderers);
                 AssignStringField(expressionLibrary, "expressionLibraryPath", ResolveExpressionLibraryPath(config, faceRenderer, additionalFaceRenderers));
                 AssignBoolField(expressionLibrary, "expressionModeActive", false);
+            }
+
+            if (expressionTriggerPlayer != null)
+            {
+                AssignObjectReference(expressionTriggerPlayer, "faceDriver", faceDriver);
+                AssignObjectReference(expressionTriggerPlayer, "expressionLibrary", expressionLibrary);
+                AssignObjectReference(expressionTriggerPlayer, "characterProfile", profile);
             }
 
             if (lipSyncController != null)
@@ -628,6 +686,7 @@ namespace Nyxara.AICompanion.Editor
                 AssignObjectReference(brain, "ttsService", tts);
                 AssignObjectReference(brain, "faceDriver", faceDriver);
                 AssignObjectReference(brain, "signalRouter", signalRouter);
+                AssignObjectReference(brain, "expressionTriggerPlayer", expressionTriggerPlayer);
                 AssignObjectReference(brain, "memoryController", memoryController);
                 AssignObjectReference(brain, "actionGatekeeper", actionGatekeeper);
                 AssignObjectReference(brain, "characterProfile", profile);
@@ -645,6 +704,7 @@ namespace Nyxara.AICompanion.Editor
                 AssignObjectReference(runtimeOverlay, "companionBrain", brain);
                 AssignBoolField(runtimeOverlay, "showOverlay", config.enableRuntimeConversationOverlay && config.showRuntimeConversationOverlay);
                 AssignBoolField(runtimeOverlay, "enabled", config.enableRuntimeConversationOverlay);
+                AssignBoolField(runtimeOverlay, "enableSmartVoiceCapture", config.enableSmartVoiceCapture);
                 AssignEnumField(runtimeOverlay, "micHoldKey", config.runtimeMicHoldKey);
                 AssignEnumField(runtimeOverlay, "promptPopupKey", config.runtimePromptPopupKey);
             }
@@ -1075,6 +1135,13 @@ namespace Nyxara.AICompanion.Editor
 
             if (!IsIntegrationEnabled(integration))
             {
+                if (ShouldDeferIntegrationBinding(integration))
+                {
+                    QueuePendingIntegrationRepair(integration);
+                    LogPendingIntegration(integration, target);
+                    return null;
+                }
+
                 LogMissingIntegration(integration, target);
                 return null;
             }
@@ -1082,11 +1149,34 @@ namespace Nyxara.AICompanion.Editor
             var resolvedType = ResolveTypeByName(typeName);
             if (resolvedType == null || !typeof(Component).IsAssignableFrom(resolvedType))
             {
+                if (ShouldDeferIntegrationBinding(integration))
+                {
+                    QueuePendingIntegrationRepair(integration);
+                    LogPendingIntegration(integration, target);
+                    return null;
+                }
+
                 LogMissingIntegration(integration, target);
                 return null;
             }
 
             return Undo.AddComponent(target, resolvedType);
+        }
+
+        internal static void QueuePendingIntegrationRepair(AICompanionStudioConfig config, bool needsLlmRepair, bool needsWhisperRepair)
+        {
+            if (config == null)
+            {
+                return;
+            }
+
+            var configPath = AssetDatabase.GetAssetPath(config);
+            if (string.IsNullOrWhiteSpace(configPath))
+            {
+                return;
+            }
+
+            QueuePendingIntegrationRepair(configPath, needsLlmRepair, needsWhisperRepair);
         }
 
         private static T GetOrAddComponent<T>(GameObject target) where T : Component
@@ -1102,6 +1192,22 @@ namespace Nyxara.AICompanion.Editor
 
         private static Type ResolveTypeByName(string typeName)
         {
+            foreach (var candidateName in EnumerateCandidateTypeNames(typeName))
+            {
+                var directType = Type.GetType(candidateName, false);
+                if (directType != null)
+                {
+                    return directType;
+                }
+            }
+
+            var cachedType = TypeCache.GetTypesDerivedFrom<Component>()
+                .FirstOrDefault(type => MatchesTypeName(type, typeName));
+            if (cachedType != null)
+            {
+                return cachedType;
+            }
+
             return AppDomain.CurrentDomain
                 .GetAssemblies()
                 .SelectMany(assembly =>
@@ -1115,7 +1221,47 @@ namespace Nyxara.AICompanion.Editor
                         return ex.Types.Where(type => type != null);
                     }
                 })
-                .FirstOrDefault(type => type != null && type.Name == typeName);
+                .FirstOrDefault(type =>
+                    type != null &&
+                    MatchesTypeName(type, typeName));
+        }
+
+        private static IEnumerable<string> EnumerateCandidateTypeNames(string typeName)
+        {
+            if (!string.IsNullOrWhiteSpace(typeName))
+            {
+                yield return typeName;
+            }
+
+            switch (typeName)
+            {
+                case "LLM":
+                    yield return "LLMUnity.LLM";
+                    break;
+                case "LLMAgent":
+                    yield return "LLMUnity.LLMAgent";
+                    break;
+                case "WhisperManager":
+                    yield return "Whisper.WhisperManager";
+                    break;
+            }
+        }
+
+        private static bool MatchesTypeName(Type type, string typeName)
+        {
+            if (type == null || string.IsNullOrWhiteSpace(typeName))
+            {
+                return false;
+            }
+
+            if (string.Equals(type.Name, typeName, StringComparison.Ordinal) ||
+                string.Equals(type.FullName, typeName, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            return EnumerateCandidateTypeNames(typeName)
+                .Any(candidateName => string.Equals(type.FullName, candidateName, StringComparison.Ordinal));
         }
 
         private static bool IsIntegrationEnabled(OptionalIntegration integration)
@@ -1123,12 +1269,20 @@ namespace Nyxara.AICompanion.Editor
             switch (integration)
             {
                 case OptionalIntegration.LlmUnity:
+                    if (ResolveTypeByName("LLM") != null && ResolveTypeByName("LLMAgent") != null)
+                    {
+                        return true;
+                    }
 #if NYXARA_LLMUNITY
                     return true;
 #else
                     return false;
 #endif
                 case OptionalIntegration.Whisper:
+                    if (ResolveTypeByName("WhisperManager") != null)
+                    {
+                        return true;
+                    }
 #if NYXARA_WHISPER
                     return true;
 #else
@@ -1137,6 +1291,181 @@ namespace Nyxara.AICompanion.Editor
                 default:
                     return false;
             }
+        }
+
+        private static bool IsIntegrationPackageDetected(OptionalIntegration integration)
+        {
+            var packageName = integration switch
+            {
+                OptionalIntegration.LlmUnity => LlmUnityPackageName,
+                OptionalIntegration.Whisper => WhisperPackageName,
+                _ => string.Empty
+            };
+
+            if (string.IsNullOrWhiteSpace(packageName))
+            {
+                return false;
+            }
+
+            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
+            if (string.IsNullOrWhiteSpace(projectRoot))
+            {
+                return false;
+            }
+
+            var packagesFolder = Path.Combine(projectRoot, "Packages", packageName);
+            if (Directory.Exists(packagesFolder))
+            {
+                return true;
+            }
+
+            var manifestPath = Path.Combine(projectRoot, "Packages", "manifest.json");
+            if (File.Exists(manifestPath))
+            {
+                try
+                {
+                    var manifestText = File.ReadAllText(manifestPath);
+                    if (manifestText.IndexOf($"\"{packageName}\"", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        return true;
+                    }
+                }
+                catch (Exception)
+                {
+                }
+            }
+
+            var packageCacheRoot = Path.Combine(projectRoot, "Library", "PackageCache");
+            if (!Directory.Exists(packageCacheRoot))
+            {
+                return false;
+            }
+
+            var packageCachePrefix = packageName + "@";
+            return Directory.GetDirectories(packageCacheRoot, packageCachePrefix + "*", SearchOption.TopDirectoryOnly).Length > 0;
+        }
+
+        private static bool ShouldDeferIntegrationBinding(OptionalIntegration integration)
+        {
+            if (IsIntegrationPackageDetected(integration))
+            {
+                return true;
+            }
+
+            return integration switch
+            {
+                OptionalIntegration.LlmUnity => HasScriptingDefine("NYXARA_LLMUNITY"),
+                OptionalIntegration.Whisper => HasScriptingDefine("NYXARA_WHISPER"),
+                _ => false
+            };
+        }
+
+        private static void QueuePendingIntegrationRepair(OptionalIntegration integration)
+        {
+            if (string.IsNullOrWhiteSpace(_activeBuildConfigPath))
+            {
+                return;
+            }
+
+            QueuePendingIntegrationRepair(
+                _activeBuildConfigPath,
+                integration == OptionalIntegration.LlmUnity,
+                integration == OptionalIntegration.Whisper);
+        }
+
+        private static void QueuePendingIntegrationRepair(string configPath, bool needsLlmRepair, bool needsWhisperRepair)
+        {
+            if (string.IsNullOrWhiteSpace(configPath))
+            {
+                return;
+            }
+
+            SessionState.SetString(PendingRepairConfigPathKey, configPath);
+            if (needsLlmRepair)
+            {
+                SessionState.SetBool(PendingRepairLlmKey, true);
+            }
+
+            if (needsWhisperRepair)
+            {
+                SessionState.SetBool(PendingRepairWhisperKey, true);
+            }
+
+            EnsurePendingRepairUpdateHook();
+        }
+
+        [InitializeOnLoadMethod]
+        private static void EnsurePendingRepairUpdateHook()
+        {
+            if (_pendingRepairUpdateHookInstalled)
+            {
+                return;
+            }
+
+            EditorApplication.update += ProcessPendingIntegrationRepair;
+            _pendingRepairUpdateHookInstalled = true;
+        }
+
+        private static void ProcessPendingIntegrationRepair()
+        {
+            if (EditorApplication.isCompiling || EditorApplication.isUpdating)
+            {
+                return;
+            }
+
+            var configPath = SessionState.GetString(PendingRepairConfigPathKey, string.Empty);
+            if (string.IsNullOrWhiteSpace(configPath))
+            {
+                return;
+            }
+
+            var wantsLlmRepair = SessionState.GetBool(PendingRepairLlmKey, false);
+            var wantsWhisperRepair = SessionState.GetBool(PendingRepairWhisperKey, false);
+            if (!wantsLlmRepair && !wantsWhisperRepair)
+            {
+                ClearPendingIntegrationRepair();
+                return;
+            }
+
+            if ((wantsLlmRepair && !ResolveIntegrationReady(OptionalIntegration.LlmUnity)) ||
+                (wantsWhisperRepair && !ResolveIntegrationReady(OptionalIntegration.Whisper)))
+            {
+                return;
+            }
+
+            var config = AssetDatabase.LoadAssetAtPath<AICompanionStudioConfig>(configPath);
+            if (config == null)
+            {
+                ClearPendingIntegrationRepair();
+                return;
+            }
+
+            var report = NyxaraIntegrationValidator.ValidateAndBind(config);
+            if (report.HasChanges)
+            {
+                EditorUtility.SetDirty(config);
+                AssetDatabase.SaveAssets();
+                EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+            }
+
+            ClearPendingIntegrationRepair();
+        }
+
+        private static bool ResolveIntegrationReady(OptionalIntegration integration)
+        {
+            return integration switch
+            {
+                OptionalIntegration.LlmUnity => ResolveTypeByName("LLM") != null && ResolveTypeByName("LLMAgent") != null,
+                OptionalIntegration.Whisper => ResolveTypeByName("WhisperManager") != null,
+                _ => false
+            };
+        }
+
+        private static void ClearPendingIntegrationRepair()
+        {
+            SessionState.EraseString(PendingRepairConfigPathKey);
+            SessionState.SetBool(PendingRepairLlmKey, false);
+            SessionState.SetBool(PendingRepairWhisperKey, false);
         }
 
         private static void LogMissingIntegration(OptionalIntegration integration, UnityEngine.Object context)
@@ -1150,6 +1479,57 @@ namespace Nyxara.AICompanion.Editor
                     Debug.LogWarning(MissingWhisperMessage, context);
                     break;
             }
+        }
+
+        private static void LogPendingIntegration(OptionalIntegration integration, UnityEngine.Object context)
+        {
+            switch (integration)
+            {
+                case OptionalIntegration.LlmUnity:
+                    Debug.LogWarning(PendingLlmMessage, context);
+                    break;
+                case OptionalIntegration.Whisper:
+                    Debug.LogWarning(PendingWhisperMessage, context);
+                    break;
+            }
+        }
+
+        private static bool HasScriptingDefine(string define)
+        {
+            if (string.IsNullOrWhiteSpace(define))
+            {
+                return false;
+            }
+
+            var defines = GetScriptingDefines();
+            if (string.IsNullOrWhiteSpace(defines))
+            {
+                return false;
+            }
+
+            return defines
+                .Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
+                .Any(entry => string.Equals(entry.Trim(), define, StringComparison.Ordinal));
+        }
+
+        private static string GetScriptingDefines()
+        {
+            var buildTargetGroup = BuildPipeline.GetBuildTargetGroup(EditorUserBuildSettings.activeBuildTarget);
+            var playerSettingsType = typeof(PlayerSettings);
+            var namedBuildTargetType = playerSettingsType.Assembly.GetType("UnityEditor.Build.NamedBuildTarget");
+            var getMethod = playerSettingsType.GetMethod("GetScriptingDefineSymbols", BindingFlags.Public | BindingFlags.Static, null, namedBuildTargetType != null ? new[] { namedBuildTargetType } : Type.EmptyTypes, null);
+            var fromGroupMethod = namedBuildTargetType?.GetMethod("FromBuildTargetGroup", BindingFlags.Public | BindingFlags.Static);
+
+            if (getMethod != null && fromGroupMethod != null)
+            {
+                var namedBuildTarget = fromGroupMethod.Invoke(null, new object[] { buildTargetGroup });
+                var result = getMethod.Invoke(null, new[] { namedBuildTarget });
+                return result as string ?? string.Empty;
+            }
+
+#pragma warning disable CS0618
+            return PlayerSettings.GetScriptingDefineSymbolsForGroup(buildTargetGroup);
+#pragma warning restore CS0618
         }
 
         private static string ResolveModelPathForLlm(AICompanionStudioConfig config)
@@ -1178,6 +1558,16 @@ namespace Nyxara.AICompanion.Editor
                 return Path.Combine("Models", CompanionStackDefaults.QwenModelFileName).Replace('\\', '/');
             }
 
+            if (TryFindFirstStreamingAssetsModelRelativePath(out var discoveredRelativePath))
+            {
+                if (config != null)
+                {
+                    config.llmModelPath = discoveredRelativePath;
+                }
+
+                return discoveredRelativePath;
+            }
+
             return configuredPath;
         }
 
@@ -1196,6 +1586,27 @@ namespace Nyxara.AICompanion.Editor
             }
 
             relativePath = Path.Combine("Models", modelFileName).Replace('\\', '/');
+            return true;
+        }
+
+        private static bool TryFindFirstStreamingAssetsModelRelativePath(out string relativePath)
+        {
+            relativePath = null;
+
+            var modelsRoot = Path.Combine(Application.streamingAssetsPath, "Models");
+            if (!Directory.Exists(modelsRoot))
+            {
+                return false;
+            }
+
+            var modelPath = Directory.GetFiles(modelsRoot, "*.gguf", SearchOption.AllDirectories).FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(modelPath))
+            {
+                return false;
+            }
+
+            var relativeModelPath = modelPath.Substring(modelsRoot.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            relativePath = Path.Combine("Models", relativeModelPath).Replace('\\', '/');
             return true;
         }
 

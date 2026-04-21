@@ -13,21 +13,26 @@
 - Expression Mode for separating full-face authoring from runtime lip-sync control
 - System scan and diagnostics tooling
 - Status Panel for quick connection checks
+- Memory tab with saved-event and relationship-memory previews plus reset controls
 - Testing tab with:
   - imported voice playback test
   - lip sync test
   - full system test
   - live lip mixer
 - Profile tab with:
-  - companion bio editing
-  - prompt sender
-  - profile JSON editing
-  - runtime JSON editing
+  - structured identity editing
+  - behavior, relationship, and response-rule editing
+  - expression trigger routing helpers
+  - preset helpers and runtime preview tools
 - Runtime in-scene conversation overlay with:
   - hold-to-talk microphone flow
   - release-to-send behavior
   - typed prompt popup
   - status display
+  - last reply visibility
+- JSON-backed saved event and relationship memory persistence
+- Diagnostic reply mode for inspecting prompt and memory behavior
+- Expression trigger playback from parsed response tags
 
 ## What Is Intentionally Excluded
 
@@ -38,7 +43,7 @@
 - Mobile-specific input handling
 - Full input rebinding UI
 - Production-grade persistence for all runtime tuning controls
-- Advanced memory editing and memory visualization tools
+- Full timeline-style memory visualization tools
 - Emotion planner / behavior tree level AI orchestration
 - Multiplayer or networked companion support
 - Cloud model fallback support
@@ -69,8 +74,7 @@
 - Input System-native rebinding UI
 - Character rig validation wizard
 - Guided lipsync calibration workflow
-- Better profile authoring UI with field-level editing and validation
-- Runtime memory inspector and authoring tools
+- Richer launch-ready runtime UI styling and UX polish
 - More advanced action execution and behavior planning
 - Safer automatic fallback handling when LLM, STT, or TTS are missing
 - One-click deployment presets for desktop builds

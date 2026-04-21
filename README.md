@@ -19,9 +19,12 @@ It is built for creators who want a practical local-first workflow inside Unity:
 - One-click studio/root setup for ARKit-compatible characters
 - Local LLM, local STT, and local TTS wiring inside Unity
 - Studio build, apply-rig, and finalize-prefab workflow
-- Expression authoring and expression library tools
-- Lip sync editing and testing tools
-- Status, diagnostics, and runtime testing panels
+- Structured profile authoring with identity, behavior, response rules, relationship defaults, and expression routing
+- Persistent memory flow with working memory, saved event memory, and saved relationship memory
+- Expression authoring, trigger routing, and expression library tools
+- Lip sync editing, testing tools, and improved multi-renderer facial support
+- Status, diagnostics, memory, and runtime testing panels
+- Runtime conversation overlay with hold-to-talk, typed prompts, and live reply visibility
 - Demo-safe sample expression/profile content
 
 ---
@@ -36,7 +39,8 @@ It is built for creators who want a practical local-first workflow inside Unity:
 6. Assign a compatible source character
 7. Build the studio root
 8. Finalize the companion prefab
-9. Enter Play Mode and test the local stack
+9. Tune profile, memory, and expression routing in Studio
+10. Enter Play Mode and test the local stack
 
 ---
 
@@ -127,12 +131,42 @@ The wizard can:
 - copy a Piper voice model into `StreamingAssets/Speech/PiperVoices`
 - update the Studio Config automatically so the rest of Nyxara uses the installed paths
 
+The current Studio Config also exposes `Smart Voice Capture` so the runtime overlay can switch between a lighter hold-to-talk path and the more protective capture flow used for speech testing.
+
 What it does not do:
 
 - it does not download dependencies
 - it does not search your computer automatically
 - it does not connect to the internet
 - it does not modify files outside the Unity project
+
+---
+
+## Studio Tabs
+
+The main Studio window now covers:
+
+- `Studio`: build, rebuild, apply-rig, finalize-prefab, and dependency wiring
+- `Status`: quick connection and readiness checks
+- `Expression`: facial authoring, trigger routing, and preset workflows
+- `Profile`: structured character authoring, response rules, preset helpers, and runtime preview tools
+- `Lips & Expression`: lip sync testing, microphone testing, and live reply inspection
+- `Memory`: working memory preview, saved event memory preview, relationship memory preview, and reset controls
+- `Diagnostics`: runtime health, STT detail, face coverage, and integration findings
+
+---
+
+## Runtime Features
+
+Current runtime behavior includes:
+
+- Character reply mode and diagnostic inspector mode for prompt and memory debugging
+- Memory-aware prompt building using current session context plus saved memory summaries
+- JSON-backed saved event memory and relationship memory under Unity persistent data
+- Relationship-state resets that can either preserve live affinity state or restore profile defaults
+- Expression trigger playback routed from parsed response tags
+- Improved microphone diagnostics including capture mode, transcript normalization, rejection reasons, and forwarding decisions
+- Runtime overlay support for hold-to-talk, typed prompts, and last reply visibility
 
 ---
 

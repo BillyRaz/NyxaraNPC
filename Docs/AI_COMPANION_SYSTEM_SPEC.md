@@ -9,6 +9,8 @@ This project is a Unity-based local AI companion pipeline for building a charact
 - speak with local text-to-speech
 - animate facial expressions and lip sync
 - save reusable expression presets
+- route expression triggers from parsed responses
+- remember meaningful conversation events and relationship changes
 - be assembled and diagnosed from one editor workflow
 
 The system is designed so a single character asset can be turned into a reusable "studio root" and then into a runtime companion prefab.
@@ -20,6 +22,8 @@ The system is designed so a single character asset can be turned into a reusable
 - Support portrait-style studio setup for testing and iteration.
 - Support split facial meshes such as head, eyelashes, eyes, and mouth.
 - Let expressions and lip sync coexist without fighting over the same blendshapes.
+- Add structured profile authoring instead of relying only on raw JSON edits.
+- Keep short-term and saved conversation memory available to the runtime prompt flow.
 - Provide diagnostics that expose missing paths, missing wiring, and rig limitations.
 
 ## Current Architecture
@@ -27,13 +31,15 @@ The system is designed so a single character asset can be turned into a reusable
 ### Editor Layer
 
 - `NyxaraCompanionStudioWindow`
-  - Main control panel for Studio, Expression, Lip Sync, and Diagnostics tabs.
-  - Central place for builder actions, expression authoring, and system scans.
+  - Main control panel for Studio, Status, Expression, Profile, Lips & Expression, Memory, and Diagnostics tabs.
+  - Central place for builder actions, profile authoring, expression authoring, memory inspection, and system scans.
 - `NyxaraCompanionStudioBuilder`
   - Builds the studio root.
   - Wires runtime components together.
   - Creates studio camera, lights, folders, and prefabs.
   - Auto-collects related face renderers for split-mesh facial rigs.
+- `NyxaraCompanionStudioWindow.Profile`
+  - Structured profile editor for identity, behavior, relationship defaults, response rules, routing, and preset helpers.
 - `ExpressionEditorWindow`
   - Detailed editor window for manual blendshape sculpting.
 - `LipSyncEditorWindow`
@@ -43,7 +49,13 @@ The system is designed so a single character asset can be turned into a reusable
 
 - `NyxaraCompanionBrain`
   - Main runtime orchestrator.
-  - Connects dialogue generation, memory, face signals, speech, and actions.
+  - Connects dialogue generation, prompt building, memory, face signals, speech, and actions.
+- `RecentMemoryController`
+  - Maintains working memory, saved event memory, and saved relationship memory.
+- `JsonMemoryEventStore`
+  - Persists saved event and relationship memory to JSON in Unity persistent data.
+- `MemoryFilterService`
+  - Decides whether a conversation event should be discarded, kept only in working memory, saved, or merged.
 - `ArkItBlendshapeDriver`
   - Runtime blendshape driver for speaking/thinking states.
   - Now supports multiple face renderers.
@@ -53,6 +65,8 @@ The system is designed so a single character asset can be turned into a reusable
 - `ExpressionLibraryManager`
   - Loads, applies, saves, deletes, and previews expression presets.
   - Supports multi-renderer expression application.
+- `ExpressionTriggerPlayer`
+  - Plays routed expression triggers with cooldown and duplicate suppression.
 - `VisemeLipSyncController`
   - Applies viseme and jaw-driven speech motion.
   - Respects expression mode rules.
@@ -73,6 +87,7 @@ The system is designed so a single character asset can be turned into a reusable
 
 - Uses Whisper integration.
 - `WhisperMicrophoneInput` and `WhisperManager` are used for player speech.
+- The microphone path now reports capture mode, normalized transcript state, rejection reasons, forwarding decisions, and explicit mic routing details.
 
 ### Text To Speech
 
@@ -94,6 +109,11 @@ The system is designed so a single character asset can be turned into a reusable
 - Stored as `ExpressionPreset` assets.
 - Each preset stores blendshape weights, identity fields, category, and timing.
 - The expression library manager loads these from the configured expression folder.
+
+### Expression Trigger Routing
+
+- Parsed response tags can now trigger routed facial expressions.
+- Trigger playback uses profile-defined routing plus cooldown and duplicate suppression rules.
 
 ### Multi-Renderer Face Support
 
@@ -136,8 +156,18 @@ The system scan in `NyxaraCompanionStudioWindow` currently checks:
 - face driver presence
 - lip sync presence
 - expression library presence
+- runtime memory state
 - source character path
 - prefab output path
+
+Speech-to-text diagnostics now also report:
+
+- visible microphone count
+- resolved mic route and selected device
+- natural versus assisted capture mode
+- last raw transcript and normalized transcript
+- rejection reason and whether debug bypass was used
+- forwarding decision and likely speech issue summary
 
 It also now reports facial rig structure, including:
 
@@ -162,6 +192,11 @@ It also now reports facial rig structure, including:
 - split face mesh support
 - diagnostics for face mesh coverage
 - expression mode ownership split
+- structured profile authoring in Studio
+- saved event memory and relationship memory persistence
+- runtime memory reset tools and previews
+- expression trigger routing from parsed response tags
+- richer STT diagnostics and runtime overlay reply visibility
 
 ## Current Known Limitations
 
@@ -187,16 +222,9 @@ Likely sources:
 - bone orientation consistency
 - humanoid avatar mapping cleanup
 
-### Diagnostics Are Informative, Not Yet Fully Summarized
+### Diagnostics Are Richer, But Still Verbose
 
-The scan reports details well, but the summary can still be improved.
-It would be useful to eventually condense the face section into grouped health states such as:
-
-- Eyes: OK
-- Jaw: OK
-- Tongue/Teeth: Limited
-- Mouth Expressions: OK
-- Split Face Mesh Support: OK
+The scan now reports much more detail for memory and STT, but it can still be condensed into clearer grouped summaries for launch.
 
 ## Progress Summary
 
@@ -205,6 +233,8 @@ It would be useful to eventually condense the face section into grouped health s
 - Facial workflow assumed a single face mesh.
 - Expression saving was more manual.
 - Diagnostics did not clearly expose split-face rig structure.
+- Profile editing relied more heavily on raw JSON and scattered fields.
+- Runtime memory persistence was not part of the main authoring workflow.
 - Mouth/jaw issues were hard to distinguish from wiring problems.
 
 ### After This Iteration
@@ -213,6 +243,9 @@ It would be useful to eventually condense the face section into grouped health s
 - Expression builder is integrated into the main studio workflow.
 - Expression mode gives clear ownership separation.
 - Diagnostics now expose renderer coverage and jaw/eye/tongue data.
+- Profile authoring is now a structured workflow inside Studio.
+- Runtime memory persistence and reset tooling are now part of the companion loop.
+- Parsed responses can trigger routed expressions directly.
 - The remaining major issues are mostly rig-related rather than editor-wiring-related.
 
 ## Recommended Next Steps
@@ -226,9 +259,10 @@ It would be useful to eventually condense the face section into grouped health s
 
 ### Editor Improvements
 
-- Add grouped face-health summaries in diagnostics.
+- Condense diagnostics into clearer grouped health summaries.
 - Expose lip-sync helper tuning values in the editor.
 - Add a dedicated rig validation section for jaw, teeth, tongue, and eye behavior.
+- Keep trimming debug-only controls from launch-facing editor surfaces where they are no longer needed.
 
 ### Runtime Improvements
 
@@ -243,11 +277,15 @@ It would be useful to eventually condense the face section into grouped health s
 ## Files Most Central To The System
 
 - `Assets/AICompanionLab/Scripts/Editor/NyxaraCompanionStudioWindow.cs`
+- `Assets/AICompanionLab/Scripts/Editor/NyxaraCompanionStudioWindow.Profile.cs`
 - `Assets/AICompanionLab/Scripts/Editor/NyxaraCompanionStudioBuilder.cs`
 - `Assets/AICompanionLab/Scripts/Core/NyxaraCompanionBrain.cs`
+- `Assets/AICompanionLab/Scripts/Runtime/RecentMemoryController.cs`
+- `Assets/AICompanionLab/Scripts/Runtime/JsonMemoryEventStore.cs`
 - `Assets/AICompanion/Runtime/Face/ArkItBlendshapeDriver.cs`
 - `Assets/AICompanionLab/Scripts/Face/ExpressionSignalRouter.cs`
 - `Assets/AICompanionLab/Scripts/Expressions/ExpressionLibraryManager.cs`
+- `Assets/AICompanionLab/Scripts/Expressions/ExpressionTriggerPlayer.cs`
 - `Assets/AICompanionLab/Scripts/LipSync/VisemeLipSyncController.cs`
 - `Assets/AICompanion/Runtime/Speech/PiperTtsService.cs`
 - `Assets/AICompanionLab/ScriptableObjects/Expressions/ExpressionPreset.cs`

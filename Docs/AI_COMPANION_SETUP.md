@@ -1,15 +1,15 @@
 # Nyxara AI Companion Stack
 
-This Unity project is now scaffolded around a local-first stack:
+This Unity project is scaffolded around a local-first companion pipeline:
 
-- `LLMUnity` for GGUF inference inside Unity
+- `LLMUnity` for local GGUF inference inside Unity
 - `whisper.unity` for local speech-to-text
-- `Piper` as an external local text-to-speech process
-- ARKit-style blendshape mapping through a custom Unity driver
+- `Piper` for local text-to-speech
+- Custom Nyxara runtime/editor tooling for profile authoring, memory, expression routing, diagnostics, and runtime UI
 
-## Local repos downloaded
+## Local repositories
 
-These upstream repositories were cloned into `External/Repos`:
+These upstream repositories are currently present under `External/Repos`:
 
 - `LLMUnity`
 - `llama.cpp`
@@ -21,85 +21,94 @@ These upstream repositories were cloned into `External/Repos`:
 
 ## Unity package wiring
 
-`Packages/manifest.json` now points at local package sources:
+`Packages/manifest.json` points at local package sources:
 
 - `ai.undream.llm` -> `External/Repos/LLMUnity`
 - `com.whisper.unity` -> `External/Repos/whisper.unity/Packages/com.whisper.unity`
 
-That keeps the project reproducible without depending on live git package fetches every time Unity refreshes.
+That keeps the project reproducible without depending on live Git package fetches during refresh.
 
-## Current model defaults
+## Current Studio workflow
 
-The project now prefers a project-local Qwen file at:
+The main path is now:
 
-- `Assets/StreamingAssets/Models/Qwen2.5-7B-Instruct-1M-Q4_K_M.gguf`
+1. Open `Nyxara AI > Studio > Setup Wizard`
+2. Import the local model/runtime assets you already downloaded
+3. Open `Nyxara AI > Studio`
+4. Assign a compatible source character
+5. Build the studio root
+6. Finalize the companion prefab
+7. Configure profile, memory, expression routing, and runtime defaults
+8. Enter Play Mode and test microphone, lip sync, replies, and overlay behavior
 
-If that file is missing, the bootstrap falls back to your original external path:
+## Setup Wizard responsibilities
 
-- `D:\Raz\Lm AI\lmstudio-community\Qwen2.5-7B-Instruct-1M-GGUF\Qwen2.5-7B-Instruct-1M-Q4_K_M.gguf`
+The wizard can currently:
 
-That path is defined in:
+- copy a `.gguf` model into `Assets/StreamingAssets/Models`
+- import Whisper Unity from a downloaded folder or package
+- copy a Whisper model into `Assets/StreamingAssets/Speech`
+- copy a Piper runtime folder into `Assets/StreamingAssets/Speech/PiperRuntime`
+- copy Piper voice files into `Assets/StreamingAssets/Speech/PiperVoices`
+- update the generated studio config asset so the project uses the imported paths
 
-- `Assets/AICompanion/Runtime/Configuration/CompanionStackDefaults.cs`
+## Runtime components in the current build
 
-## Scene bootstrap
+- `NyxaraCompanionBrain`
+  - Coordinates prompt building, reply generation, parsing, runtime state, and memory recording.
+- `RecentMemoryController`
+  - Tracks working memory plus saved event and relationship memory.
+- `JsonMemoryEventStore`
+  - Persists saved event and relationship memories as JSON under Unity persistent data.
+- `WhisperMicrophoneInput`
+  - Records microphone audio, resolves mic routing, normalizes transcripts, and reports rejection/debug state.
+- `PiperTtsService`
+  - Generates and plays local speech output when voice is enabled.
+- `ArkItBlendshapeDriver`
+  - Drives facial blendshapes and now works better with multi-renderer face setups.
+- `ExpressionTriggerPlayer`
+  - Plays expression triggers routed from parsed response tags.
+- `RuntimeConversationOverlay`
+  - Exposes hold-to-talk, typed prompts, and reply/status feedback in play mode.
 
-After Unity finishes importing packages, use:
+## Current configuration expectations
 
-- `Nyxara > AI Companion > Create Bootstrap Objects`
+### LLM model
 
-This creates:
+Provide a GGUF model in the project-local model folder, typically:
 
-- `Local LLM` with `LLM`
-- `Companion Agent` with `LLMAgent` and `NyxaraCompanionBrain`
-- `Speech To Text` with `WhisperManager` and `WhisperMicrophoneInput`
-- `Speech Synthesis` with `AudioSource` and `PiperTtsService`
-- `Face Driver` with `ArkItBlendshapeDriver`
-
-## What still needs one manual file drop
+- `Assets/StreamingAssets/Models`
 
 ### Whisper model
 
-Put a Whisper model file at:
+Provide a Whisper model under:
 
-- `Assets/StreamingAssets/Speech/ggml-tiny.bin`
+- `Assets/StreamingAssets/Speech`
 
-The package README recommends the `ggerganov/whisper.cpp` model files. You can also use a larger model and update the manager path later.
+### Piper runtime and voice
 
-### Piper executable and voice
+Provide:
 
-Point `PiperTtsService` to:
+- a Piper runtime folder under `Assets/StreamingAssets/Speech/PiperRuntime`
+- at least one Piper voice `.onnx` model under `Assets/StreamingAssets/Speech/PiperVoices`
 
-- your local `piper.exe`
-- a Piper voice `.onnx` model
+## Studio tabs that matter right now
 
-This project does not hardcode those paths because Piper deployments vary a lot by machine.
+- `Profile`
+  - Structured character authoring, presets, expression routing, and live runtime preview
+- `Memory`
+  - Memory previews plus reset controls for session, saved event, and relationship memory
+- `Lips & Expression`
+  - Lip sync tests, microphone tests, and reply inspection
+- `Diagnostics`
+  - Runtime health, STT diagnostics, face coverage, and integration findings
 
-Downloaded Piper voice presets already in the project:
+## Suggested validation pass inside Unity
 
-- `Assets/StreamingAssets/Speech/PiperVoices/en_US-amy-medium.onnx`
-- `Assets/StreamingAssets/Speech/PiperVoices/en_US-lessac-medium.onnx`
-
-Matching `.onnx.json` config files are stored beside each model.
-
-## External voice tools you already have
-
-- `D:\Raz\Voice` contains a packaged app install for `Voice Creator Pro` version `1.1.4.0`
-- That app looks suitable for future voice cloning / custom preset generation
-- It is not a source repository, so treat it as an external content-creation tool rather than part of the Unity codebase
-
-## Runtime scripts added
-
-- `NyxaraCompanionBrain` coordinates LLM reply generation and optional TTS playback.
-- `WhisperMicrophoneInput` records from the microphone, transcribes with Whisper, and can auto-send text to the brain.
-- `PiperTtsService` shells out to Piper, loads the generated wav, and plays it through an `AudioSource`.
-- `ArkItBlendshapeDriver` applies simple speaking/thinking values to ARKit-style blendshape names on a `SkinnedMeshRenderer`.
-
-## Suggested next pass inside Unity
-
-1. Open the project and let Package Manager import the two local packages.
-2. Run `Nyxara > AI Companion > Create Bootstrap Objects`.
-3. Add your face mesh renderer to `Face Driver`.
-4. Drop in a Whisper model under `Assets/StreamingAssets/Speech`.
-5. Set Piper executable and voice paths on `Speech Synthesis`.
-6. Add a simple UI button pair for `StartRecording` and `StopRecordingAndTranscribeAsync`.
+1. Let Package Manager finish importing local packages.
+2. Run the Setup Wizard for any missing external assets.
+3. Open the Studio window and verify `Status` and `Diagnostics`.
+4. Build or rebuild the studio root and finalize the prefab.
+5. Open `Profile` and confirm identity, relationship defaults, and response rules.
+6. Open `Memory` and verify the reset controls and saved-memory previews.
+7. Enter Play Mode and test the runtime overlay plus mic flow.

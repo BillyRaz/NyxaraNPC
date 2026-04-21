@@ -5,6 +5,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Nyxara.AICompanion.Face;
 using UnityEngine;
 
 #if UNITY_EDITOR
@@ -125,11 +126,7 @@ namespace Nyxara.AICompanion.Expressions
                         continue;
                     }
 
-                    var index = renderer.sharedMesh.GetBlendShapeIndex(pair.Key);
-                    if (index >= 0)
-                    {
-                        renderer.SetBlendShapeWeight(index, pair.Value);
-                    }
+                    ApplyBlendshapeWeight(renderer, pair.Key, pair.Value);
                 }
             }
         }
@@ -205,7 +202,7 @@ namespace Nyxara.AICompanion.Expressions
                 return;
             }
 
-            expressionLibraryPath = libraryPath;
+            expressionLibraryPath = NormalizeExpressionLibraryPath(libraryPath);
             if (reload)
             {
                 LoadAllPresets();
@@ -311,21 +308,7 @@ namespace Nyxara.AICompanion.Expressions
             return new string(value.Select(ch => invalidChars.Contains(ch) ? '_' : ch).ToArray());
         }
 
-        private static string NormalizeExpressionLibraryPath(string path)
-        {
-            if (string.IsNullOrWhiteSpace(path) ||
-                string.Equals(path, "Assets/Nyxara Ai Studio/AICompanionStudio/Expressions", StringComparison.Ordinal) ||
-                string.Equals(path, "Assets/Nyxara AI Studio/AICompanionStudio/Expressions", StringComparison.Ordinal) ||
-                string.Equals(path, "Assets/NyxaraAIStudio/Expressions", StringComparison.Ordinal) ||
-                string.Equals(path, "Assets/AICompanionStudio/Expressions", StringComparison.Ordinal) ||
-                !path.StartsWith("Assets/Nyxara AI Studio/", StringComparison.Ordinal))
-            {
-                return "Assets/Nyxara AI Studio/Generated/Expressions";
-            }
-
-            return path;
-        }
-#endif
+        #endif
 
         private List<SkinnedMeshRenderer> GetAllFaceRenderers()
         {
@@ -344,6 +327,41 @@ namespace Nyxara.AICompanion.Expressions
             }
 
             return renderers;
+        }
+
+        private static string NormalizeExpressionLibraryPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) ||
+                string.Equals(path, "Assets/Nyxara Ai Studio/AICompanionStudio/Expressions", StringComparison.Ordinal) ||
+                string.Equals(path, "Assets/Nyxara AI Studio/AICompanionStudio/Expressions", StringComparison.Ordinal) ||
+                string.Equals(path, "Assets/NyxaraAIStudio/Expressions", StringComparison.Ordinal) ||
+                string.Equals(path, "Assets/AICompanionStudio/Expressions", StringComparison.Ordinal) ||
+                !path.StartsWith("Assets/Nyxara AI Studio/", StringComparison.Ordinal))
+            {
+                return "Assets/Nyxara AI Studio/Generated/Expressions";
+            }
+
+            return path;
+        }
+
+        private static void ApplyBlendshapeWeight(SkinnedMeshRenderer renderer, string blendshapeName, float weight)
+        {
+            if (renderer == null || renderer.sharedMesh == null || string.IsNullOrWhiteSpace(blendshapeName))
+            {
+                return;
+            }
+
+            var appliedIndices = new HashSet<int>();
+            foreach (var candidate in ArkItBlendshapeDriver.ResolveBlendshapeCandidates(blendshapeName))
+            {
+                var index = renderer.sharedMesh.GetBlendShapeIndex(candidate);
+                if (index < 0 || !appliedIndices.Add(index))
+                {
+                    continue;
+                }
+
+                renderer.SetBlendShapeWeight(index, weight);
+            }
         }
     }
 }

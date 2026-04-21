@@ -14,7 +14,9 @@ using Nyxara.AICompanion.Diagnostics;
 using Nyxara.AICompanion.Expressions;
 using Nyxara.AICompanion.Face;
 using Nyxara.AICompanion.LipSync;
+using Nyxara.AICompanion.Runtime;
 using Nyxara.AICompanion.Speech;
+using Nyxara.AICompanion.UI;
 using Nyxara.AICompanion.Studio;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -22,7 +24,7 @@ using UnityEngine;
 
 namespace Nyxara.AICompanion.Editor
 {
-    public class NyxaraCompanionStudioWindow : EditorWindow
+    public partial class NyxaraCompanionStudioWindow : EditorWindow
     {
         private const string DefaultStudioRootFolder = "Assets/Nyxara AI Studio";
         private const string DefaultGeneratedFolder = DefaultStudioRootFolder + "/Generated";
@@ -52,7 +54,8 @@ namespace Nyxara.AICompanion.Editor
             Status,
             Expression,
             Profile,
-            Testing,
+            LipsAndExpression,
+            Memory,
             Diagnostics
         }
 
@@ -129,9 +132,14 @@ namespace Nyxara.AICompanion.Editor
         private string _lipSyncTestLine = "Testing lip sync. Jaw, mouth, tongue, and voice should all respond together.";
         private string _llmTestPrompt = "Give me a short in-character greeting and one sentence about how you're feeling.";
         private string _llmTestReply = string.Empty;
+        private string _runtimeReplyText = string.Empty;
         private string _fullSystemTestPrompt = "Hello Nyxara. Please greet me briefly, say how you are feeling, and end with a short invitation to continue talking.";
         private string _fullSystemTestStatus = string.Empty;
         private string _microphoneTranscript = string.Empty;
+        private bool _memoryStartFreshConversation = true;
+        private bool _memoryKeepPersonalityButWipeMemory = true;
+        private Vector2 _memoryEventsScroll;
+        private Vector2 _memoryRelationshipScroll;
         private AudioClip _testingVoiceClip;
         private string _profileJson = string.Empty;
         private string _runtimeJson = string.Empty;
@@ -189,6 +197,16 @@ namespace Nyxara.AICompanion.Editor
             window.Show();
         }
 
+        [MenuItem("Nyxara AI/Editors/Memory", false, 31)]
+        public static void ShowMemoryEditor()
+        {
+            var window = GetWindow<NyxaraCompanionStudioWindow>("Nyxara AI Studio");
+            window.minSize = new Vector2(620f, 760f);
+            window._currentTab = StudioTab.Memory;
+            window.Show();
+            window.Focus();
+        }
+
         private void OnEnable()
         {
             _config = LoadOrCreateConfig();
@@ -211,7 +229,7 @@ namespace Nyxara.AICompanion.Editor
 
         private void OnEditorUpdate()
         {
-            if (_currentTab == StudioTab.Testing && EditorApplication.isPlaying)
+            if (_currentTab == StudioTab.LipsAndExpression && EditorApplication.isPlaying)
             {
                 UpdateTestingLipPreview();
             }
@@ -277,13 +295,20 @@ namespace Nyxara.AICompanion.Editor
                     case StudioTab.Profile:
                         DrawProfileTab();
                         break;
-                    case StudioTab.Testing:
+                    case StudioTab.LipsAndExpression:
                         DrawTestingTab();
+                        break;
+                    case StudioTab.Memory:
+                        DrawMemoryTab();
                         break;
                     case StudioTab.Diagnostics:
                         DrawDiagnosticsTab();
                         break;
                 }
+            }
+            catch (ExitGUIException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -310,7 +335,7 @@ namespace Nyxara.AICompanion.Editor
             if (GUILayout.Button("Status", EditorStyles.miniButtonMid)) _currentTab = StudioTab.Status;
             if (GUILayout.Button("Expression", EditorStyles.miniButtonMid)) _currentTab = StudioTab.Expression;
             if (GUILayout.Button("Profile", EditorStyles.miniButtonMid)) _currentTab = StudioTab.Profile;
-            if (GUILayout.Button("Testing", EditorStyles.miniButtonMid)) _currentTab = StudioTab.Testing;
+            if (GUILayout.Button("Lips & Expression", EditorStyles.miniButtonMid)) _currentTab = StudioTab.LipsAndExpression;
             if (GUILayout.Button("Diagnostics", EditorStyles.miniButtonRight)) _currentTab = StudioTab.Diagnostics;
             GUILayout.EndHorizontal();
         }
@@ -320,9 +345,8 @@ namespace Nyxara.AICompanion.Editor
             GUILayout.BeginHorizontal(EditorStyles.toolbar);
             GUILayout.Label("Studio Tools", GUILayout.Width(82f));
             if (GUILayout.Button("Setup Wizard", EditorStyles.toolbarButton)) NyxaraSetupWizardWindow.ShowWindow();
-            if (GUILayout.Button("Expression Editor", EditorStyles.toolbarButton)) ExpressionEditorWindow.ShowWindow();
-            if (GUILayout.Button("Lip Sync Editor", EditorStyles.toolbarButton)) LipSyncEditorWindow.ShowWindow();
-            if (GUILayout.Button("Diagnostics", EditorStyles.toolbarButton)) _currentTab = StudioTab.Diagnostics;
+            if (GUILayout.Button("Status", EditorStyles.toolbarButton)) _currentTab = StudioTab.Status;
+            if (GUILayout.Button("Memory", EditorStyles.toolbarButton)) _currentTab = StudioTab.Memory;
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
         }
@@ -379,13 +403,160 @@ namespace Nyxara.AICompanion.Editor
             EnsureTestingJsonLoaded(brain);
 
             EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField("Profile Tools", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox("Use this tab for companion bio, profile JSON updates, prompt sending, and runtime JSON editing.", MessageType.Info);
-            DrawCompanionBioSection();
-            EditorGUILayout.Space(8f);
-            DrawPromptSenderSection(brain);
-            EditorGUILayout.Space(8f);
-            DrawRuntimeJsonSection(brain);
+            EditorGUILayout.LabelField("Profile Studio", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox("Author structured character identity, behavior, response rules, runtime defaults, and expression trigger routing here. The raw runtime JSON tools are still available as the advanced layer below.", MessageType.Info);
+            DrawStructuredProfileStudio(brain, studioRoot);
+            EditorGUILayout.EndVertical();
+        }
+
+        private void DrawMemoryTab()
+        {
+            var studioRoot = ResolveStudioRootFromContext();
+            var brain = studioRoot != null ? studioRoot.GetComponent<NyxaraCompanionBrain>() : FindFirstObjectByType<NyxaraCompanionBrain>();
+            var memoryController = brain != null ? brain.MemoryController : FindFirstObjectByType<RecentMemoryController>();
+            var characterId = brain?.CharacterProfile?.identity?.characterName;
+
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Memory", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox("Use this tab to inspect and reset Nyxara's working memory, saved event memory, relationship memory, and current conversation state without touching the character profile.", MessageType.Info);
+
+            if (brain == null || memoryController == null)
+            {
+                EditorGUILayout.HelpBox("No live NyxaraCompanionBrain or RecentMemoryController was found in the active scene.", MessageType.Warning);
+                if (GUILayout.Button("Open Runtime Diagnostics"))
+                {
+                    _currentTab = StudioTab.Diagnostics;
+                    _diagnosticsTab = DiagnosticsTab.Runtime;
+                }
+
+                EditorGUILayout.EndVertical();
+                return;
+            }
+
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Current Memory Status", EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField($"Working Memory Entries: {memoryController.GetMemoryCount()}");
+            EditorGUILayout.LabelField($"Saved Event Memory Entries: {memoryController.GetSavedEventCount()}");
+            EditorGUILayout.LabelField($"Saved Relationship Memory Entries: {memoryController.GetSavedRelationshipEventCount()}");
+            EditorGUILayout.LabelField("Storage Summary");
+            EditorGUILayout.LabelField(memoryController.GetMemoryStorageSummary(), EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.Space(4f);
+            EditorGUILayout.LabelField("Live Runtime State", EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField(brain.LastRuntimeStateSummary, EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.EndVertical();
+
+            var eventsPath = memoryController.GetEventsFilePath(characterId);
+            var relationshipPath = memoryController.GetRelationshipFilePath(characterId);
+
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Memory Files", EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField("Event Memory File");
+            EditorGUILayout.SelectableLabel(string.IsNullOrWhiteSpace(eventsPath) ? "<unavailable>" : eventsPath, EditorStyles.textField, GUILayout.Height(34f));
+            EditorGUILayout.BeginHorizontal();
+            GUI.enabled = !string.IsNullOrWhiteSpace(eventsPath);
+            if (GUILayout.Button("Reveal Event File"))
+            {
+                EditorUtility.RevealInFinder(eventsPath);
+            }
+
+            if (GUILayout.Button("Copy Event Path"))
+            {
+                EditorGUIUtility.systemCopyBuffer = eventsPath;
+            }
+            GUI.enabled = true;
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(4f);
+            EditorGUILayout.LabelField("Relationship Memory File");
+            EditorGUILayout.SelectableLabel(string.IsNullOrWhiteSpace(relationshipPath) ? "<unavailable>" : relationshipPath, EditorStyles.textField, GUILayout.Height(34f));
+            EditorGUILayout.BeginHorizontal();
+            GUI.enabled = !string.IsNullOrWhiteSpace(relationshipPath);
+            if (GUILayout.Button("Reveal Relationship File"))
+            {
+                EditorUtility.RevealInFinder(relationshipPath);
+            }
+
+            if (GUILayout.Button("Copy Relationship Path"))
+            {
+                EditorGUIUtility.systemCopyBuffer = relationshipPath;
+            }
+            GUI.enabled = true;
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.EndVertical();
+
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Reset Options", EditorStyles.miniBoldLabel);
+            _memoryStartFreshConversation = EditorGUILayout.Toggle("Start Fresh Conversation", _memoryStartFreshConversation);
+            _memoryKeepPersonalityButWipeMemory = EditorGUILayout.Toggle("Keep Personality But Wipe Memory", _memoryKeepPersonalityButWipeMemory);
+            EditorGUILayout.HelpBox(
+                _memoryKeepPersonalityButWipeMemory
+                    ? "Memory will be wiped, but Nyxara keeps the current live relationship/mood state. The character profile always stays intact."
+                    : "Memory will be wiped and Nyxara's live relationship/runtime state will return to profile defaults when a fresh conversation reset is applied.",
+                MessageType.None);
+            EditorGUILayout.EndVertical();
+
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Memory Controls", EditorStyles.miniBoldLabel);
+
+            if (GUILayout.Button("Reset All Memory", GUILayout.Height(30f)))
+            {
+                memoryController.ResetAllMemory(characterId);
+                if (_memoryStartFreshConversation)
+                {
+                    brain.ResetConversationState(_memoryKeepPersonalityButWipeMemory);
+                }
+
+                Debug.Log("[Nyxara Memory] Reset all memory requested from Studio Memory tab.");
+            }
+
+            if (GUILayout.Button("Reset Relationship Only", GUILayout.Height(28f)))
+            {
+                memoryController.ResetRelationshipMemory(characterId);
+                brain.ResetRelationshipStateToDefaults();
+                Debug.Log("[Nyxara Memory] Reset relationship memory requested from Studio Memory tab.");
+            }
+
+            if (GUILayout.Button("Reset Saved Event Memory Only", GUILayout.Height(28f)))
+            {
+                memoryController.ResetSavedEventMemory(characterId);
+                Debug.Log("[Nyxara Memory] Reset saved event memory requested from Studio Memory tab.");
+            }
+
+            if (GUILayout.Button("Reset Session Memory", GUILayout.Height(28f)))
+            {
+                memoryController.ResetSessionMemory();
+                if (_memoryStartFreshConversation)
+                {
+                    brain.ResetConversationState(_memoryKeepPersonalityButWipeMemory);
+                }
+
+                Debug.Log("[Nyxara Memory] Reset session memory requested from Studio Memory tab.");
+            }
+
+            EditorGUILayout.Space(6f);
+            if (GUILayout.Button("Open Runtime Diagnostics", GUILayout.Height(24f)))
+            {
+                _currentTab = StudioTab.Diagnostics;
+                _diagnosticsTab = DiagnosticsTab.Runtime;
+            }
+            EditorGUILayout.EndVertical();
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Saved Event Preview", EditorStyles.miniBoldLabel);
+            _memoryEventsScroll = EditorGUILayout.BeginScrollView(_memoryEventsScroll, GUILayout.MinHeight(180f));
+            EditorGUILayout.SelectableLabel(memoryController.BuildSavedEventPreview(characterId), EditorStyles.textArea, GUILayout.ExpandHeight(true));
+            EditorGUILayout.EndScrollView();
+            EditorGUILayout.EndVertical();
+
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Relationship Memory Preview", EditorStyles.miniBoldLabel);
+            _memoryRelationshipScroll = EditorGUILayout.BeginScrollView(_memoryRelationshipScroll, GUILayout.MinHeight(180f));
+            EditorGUILayout.SelectableLabel(memoryController.BuildRelationshipPreview(characterId), EditorStyles.textArea, GUILayout.ExpandHeight(true));
+            EditorGUILayout.EndScrollView();
+            EditorGUILayout.EndVertical();
+            EditorGUILayout.EndHorizontal();
+
             EditorGUILayout.EndVertical();
         }
 
@@ -695,7 +866,20 @@ namespace Nyxara.AICompanion.Editor
             EditorGUILayout.HelpBox("Use this in Play Mode to talk to Nyxara through the scene microphone path. Start recording, speak, then stop to transcribe and optionally auto-reply through the brain.", MessageType.Info);
             EditorGUILayout.LabelField("Microphone Input", whisperInput != null ? whisperInput.name : "Missing in scene");
             EditorGUILayout.LabelField("Brain", brain != null ? brain.name : "Missing in scene");
-            EditorGUILayout.LabelField("Recording", whisperInput != null && whisperInput.IsRecording ? "Active" : "Idle");
+              EditorGUILayout.LabelField("Recording", whisperInput != null && whisperInput.IsRecording ? "Active" : "Idle");
+              if (whisperInput != null)
+              {
+                  EditorGUILayout.LabelField("Resolved Device", whisperInput.ActiveMicrophoneDevice ?? "<default>");
+                  EditorGUILayout.LabelField("Live Capture Device", whisperInput.ActiveRecordingDevice);
+                  EditorGUILayout.LabelField("Mic Route", whisperInput.LastResolvedMicrophoneRoute);
+                  EditorGUILayout.LabelField("Mic Diagnostic", whisperInput.LastMicrophoneDiagnostic);
+                  EditorGUILayout.LabelField("Audio Stats", $"{whisperInput.LastRecordingDurationSeconds:0.00}s | RMS {whisperInput.LastRecordingRms:0.0000} | Peak {whisperInput.LastRecordingPeak:0.0000} | Gain {whisperInput.LastAppliedPreampGain:0.00}x");
+                  EditorGUILayout.LabelField("Speech Gate", $"RMS >= {whisperInput.MinRmsForSpeech:0.0000}, Peak >= {whisperInput.MinPeakForSpeech:0.0000}, PreGain {whisperInput.PreTranscriptionGain:0.00}x");
+                  EditorGUILayout.LabelField("Transcript Filters", $"Music {(whisperInput.RejectMusicLikeTranscripts ? "ON" : "OFF")} | Bracket Tags {(whisperInput.RejectBracketedNonSpeechTags ? "ON" : "OFF")}");
+                  EditorGUILayout.LabelField("Capture Mode", whisperInput.CaptureModeLabel);
+                  EditorGUILayout.LabelField("Failure Mode", whisperInput.LastCaptureFailureMode);
+                  EditorGUILayout.LabelField("Forwarding", whisperInput.LastForwardingDecision);
+              }
 
             EditorGUILayout.BeginHorizontal();
             GUI.enabled = EditorApplication.isPlaying && whisperInput != null && !whisperInput.IsRecording;
@@ -718,6 +902,23 @@ namespace Nyxara.AICompanion.Editor
             {
                 EditorGUILayout.LabelField("Last Transcript", EditorStyles.miniBoldLabel);
                 EditorGUILayout.TextArea(_microphoneTranscript, GUILayout.MinHeight(48f));
+            }
+
+            if (whisperInput != null && !string.IsNullOrWhiteSpace(whisperInput.LastRawTranscript))
+            {
+                EditorGUILayout.LabelField("Last Raw STT", EditorStyles.miniBoldLabel);
+                EditorGUILayout.TextArea(whisperInput.LastRawTranscript, GUILayout.MinHeight(48f));
+            }
+
+            if (whisperInput != null && !string.IsNullOrWhiteSpace(whisperInput.LastNormalizedTranscript))
+            {
+                EditorGUILayout.LabelField("Last Normalized STT", EditorStyles.miniBoldLabel);
+                EditorGUILayout.TextArea(whisperInput.LastNormalizedTranscript, GUILayout.MinHeight(48f));
+            }
+
+            if (whisperInput != null && !string.IsNullOrWhiteSpace(whisperInput.LastRejectedTranscriptReason))
+            {
+                EditorGUILayout.HelpBox($"Rejected Transcript Reason: {whisperInput.LastRejectedTranscriptReason}", MessageType.Info);
             }
 
             if (!EditorApplication.isPlaying)
@@ -893,6 +1094,7 @@ namespace Nyxara.AICompanion.Editor
             EditorGUILayout.LabelField("Runtime Input", EditorStyles.miniBoldLabel);
             _config.enableRuntimeConversationOverlay = EditorGUILayout.Toggle("Enable Runtime Voice Overlay", _config.enableRuntimeConversationOverlay);
             _config.showRuntimeConversationOverlay = EditorGUILayout.Toggle("Show Runtime Overlay", _config.showRuntimeConversationOverlay);
+            _config.enableSmartVoiceCapture = EditorGUILayout.Toggle("Enable Smart Voice Capture", _config.enableSmartVoiceCapture);
             _config.runtimeMicHoldKey = (KeyCode)EditorGUILayout.EnumPopup("Mic Hold Key", _config.runtimeMicHoldKey);
             _config.runtimePromptPopupKey = (KeyCode)EditorGUILayout.EnumPopup("Prompt Popup Key", _config.runtimePromptPopupKey);
             EditorGUILayout.EndVertical();
@@ -1226,17 +1428,18 @@ namespace Nyxara.AICompanion.Editor
             var faceDriver = studioRoot != null ? studioRoot.GetComponent<ArkItBlendshapeDriver>() : null;
             var ttsService = FindFirstObjectByType<PiperTtsService>();
             var whisperInput = FindFirstObjectByType<WhisperMicrophoneInput>();
+            SyncRuntimeReplyText(brain);
             EnsureTestingAssetsLoaded();
             EnsureTestingJsonLoaded(brain);
 
             EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField("Testing Tools", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Lips And Expression", EditorStyles.boldLabel);
             EditorGUILayout.LabelField("Studio Root", studioRoot != null ? studioRoot.name : "Missing");
             _expressionRenderer = (SkinnedMeshRenderer)EditorGUILayout.ObjectField("Face Renderer", _expressionRenderer, typeof(SkinnedMeshRenderer), true);
             _lipSyncData = (LipSyncData)EditorGUILayout.ObjectField("Lip Sync Data", _lipSyncData, typeof(LipSyncData), false);
             EditorGUILayout.LabelField("Lip Sync Controller", lipSyncController != null ? lipSyncController.name : "Missing in scene");
             EditorGUILayout.LabelField("Brain", brain != null ? brain.name : "Missing in scene");
-            EditorGUILayout.HelpBox("Use this tab to test imported voice playback, full Piper lip sync, live lip controls, and the full runthrough path from one place.", MessageType.Info);
+            EditorGUILayout.HelpBox("Use this tab to tune mouth motion, preview blinking, run voice playback checks, and test the full expression-to-speech flow from one place.", MessageType.Info);
 
             EditorGUILayout.Space(8f);
             EditorGUILayout.LabelField("TTS Test", EditorStyles.miniBoldLabel);
@@ -1262,11 +1465,6 @@ namespace Nyxara.AICompanion.Editor
             _lipSyncTestLine = EditorGUILayout.TextField("Test Line", _lipSyncTestLine);
 
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Open Detailed Lip Sync Editor"))
-            {
-                LipSyncEditorWindow.ShowWindow();
-            }
-
             GUI.enabled = EditorApplication.isPlaying && ttsService != null;
             if (GUILayout.Button("Run Lip Sync Test"))
             {
@@ -1299,6 +1497,9 @@ namespace Nyxara.AICompanion.Editor
             {
                 EditorGUILayout.HelpBox(_fullSystemTestStatus, MessageType.None);
             }
+
+            EditorGUILayout.Space(8f);
+            DrawRuntimeReplyOutputSection(brain, ttsService);
 
             if (!EditorApplication.isPlaying)
             {
@@ -1452,8 +1653,8 @@ namespace Nyxara.AICompanion.Editor
                 UpdateStatus("System scan: completed and logged to Unity console.");
                 EnsureRuntimeLipSyncProfile(ResolveStudioRootFromContext(), false);
                 EnsureRuntimeMouthControl(ResolveStudioRootFromContext());
-                UpdateStatus("Sending prompt through NyxaraCompanionBrain...");
-                var reply = await brain.ReplyToAsync(_fullSystemTestPrompt);
+                UpdateStatus("Sending internal diagnostic prompt through NyxaraCompanionBrain...");
+                var reply = await brain.ReplyToSystemAsync(_fullSystemTestPrompt);
                 _llmTestReply = reply;
                 UpdateStatus(string.IsNullOrWhiteSpace(reply) ? "LLM reply: empty" : $"LLM reply: {reply}");
 
@@ -2158,8 +2359,73 @@ namespace Nyxara.AICompanion.Editor
         {
             EditorGUILayout.BeginVertical("box");
             EditorGUILayout.LabelField("Runtime Diagnostics", EditorStyles.boldLabel);
+            var runtimeOverlay = FindFirstObjectByType<RuntimeConversationOverlay>();
+            var runtimeBrain = FindFirstObjectByType<NyxaraCompanionBrain>();
+
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Runtime Prompt Check", EditorStyles.miniBoldLabel);
+            if (runtimeOverlay == null)
+            {
+                EditorGUILayout.HelpBox(
+                    EditorApplication.isPlaying
+                        ? "No RuntimeConversationOverlay found in the active scene, so the prompt-check bar cannot be toggled from here."
+                        : "Enter Play Mode to attach to the live RuntimeConversationOverlay and toggle the prompt-check bar from here.",
+                    MessageType.Info);
+            }
+            else
+            {
+                var showPromptCheckBar = EditorGUILayout.Toggle("Enable Prompt Check Bar", runtimeOverlay.ShowDiagnosticPromptCheckBar);
+                if (showPromptCheckBar != runtimeOverlay.ShowDiagnosticPromptCheckBar)
+                {
+                    runtimeOverlay.ShowDiagnosticPromptCheckBar = showPromptCheckBar;
+                    EditorUtility.SetDirty(runtimeOverlay);
+                }
+
+                var smartVoiceCapture = EditorGUILayout.Toggle("Enable Smart Voice Capture", runtimeOverlay.EnableSmartVoiceCapture);
+                if (smartVoiceCapture != runtimeOverlay.EnableSmartVoiceCapture)
+                {
+                    runtimeOverlay.EnableSmartVoiceCapture = smartVoiceCapture;
+                    EditorUtility.SetDirty(runtimeOverlay);
+                }
+
+                EditorGUILayout.HelpBox(
+                    showPromptCheckBar
+                        ? "The runtime overlay will show the prompt-check sections and mirror them to the Unity console."
+                        : "The runtime overlay will stay player-facing only, without the prompt-check sections or console payloads.",
+                    MessageType.None);
+            }
+            EditorGUILayout.EndVertical();
+
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Reply Mode", EditorStyles.miniBoldLabel);
+            if (runtimeBrain == null)
+            {
+                EditorGUILayout.HelpBox(
+                    EditorApplication.isPlaying
+                        ? "No live NyxaraCompanionBrain was found, so reply mode cannot be changed from here."
+                        : "Enter Play Mode to switch between final character mode and diagnostic inspector mode.",
+                    MessageType.Info);
+            }
+            else
+            {
+                var selectedMode = (NyxaraReplyMode)EditorGUILayout.EnumPopup("Runtime Reply Mode", runtimeBrain.ReplyMode);
+                if (selectedMode != runtimeBrain.ReplyMode)
+                {
+                    runtimeBrain.ReplyMode = selectedMode;
+                    EditorUtility.SetDirty(runtimeBrain);
+                }
+
+                EditorGUILayout.HelpBox(
+                    selectedMode == NyxaraReplyMode.DiagnosticInspector
+                        ? "Diagnostic Inspector mode is active. Nyxara will answer more like a robotic inspection assistant and report memory/state directly."
+                        : "Character mode is active. Nyxara will stay immersive, humanized, and more evasive when appropriate.",
+                    MessageType.None);
+            }
+            EditorGUILayout.EndVertical();
+
             if (!EditorApplication.isPlaying)
             {
+                EditorGUILayout.Space(6f);
                 EditorGUILayout.HelpBox("Runtime diagnostics only update during Play Mode.", MessageType.Info);
                 EditorGUILayout.EndVertical();
                 return;
@@ -2178,6 +2444,17 @@ namespace Nyxara.AICompanion.Editor
                 EditorGUILayout.EndVertical();
                 return;
             }
+
+            var studioRoot = ResolveStudioRootFromContext();
+            var brain = studioRoot != null ? studioRoot.GetComponent<NyxaraCompanionBrain>() : null;
+            var ttsService = FindFirstObjectByType<PiperTtsService>();
+            SyncRuntimeReplyText(brain);
+
+            EditorGUILayout.Space(6f);
+            DrawRuntimeReplyOutputSection(brain, ttsService);
+            EditorGUILayout.Space(6f);
+            DrawRuntimeMemorySection(brain);
+            EditorGUILayout.Space(6f);
 
             var report = _runtimeMonitor.CurrentReport;
             if (report != null)
@@ -2225,6 +2502,17 @@ namespace Nyxara.AICompanion.Editor
             EditorGUILayout.LabelField($"Scan completed at {report.timestamp} in {report.durationMs:F0} ms", EditorStyles.miniLabel);
             EditorGUILayout.LabelField(report.IsHealthy ? "Overall Status: Healthy" : "Overall Status: Issues Found", EditorStyles.boldLabel);
             EditorGUILayout.Space(6f);
+
+            if (report.findings != null && report.findings.Count > 0)
+            {
+                foreach (var finding in report.findings)
+                {
+                    EditorGUILayout.HelpBox($"{finding.title}\n{finding.message}", ToEditorMessageType(finding.severity));
+                }
+
+                EditorGUILayout.Space(6f);
+            }
+
             DrawComponentStatusCard(report.llmStatus);
             DrawComponentStatusCard(report.sttStatus);
             DrawComponentStatusCard(report.ttsStatus);
@@ -2234,7 +2522,12 @@ namespace Nyxara.AICompanion.Editor
 
             foreach (var issue in report.configIssues)
             {
-                var type = issue.severity == IssueSeverity.Critical ? MessageType.Error : MessageType.Warning;
+                var type = issue.severity switch
+                {
+                    IssueSeverity.Critical => MessageType.Error,
+                    IssueSeverity.Warning => MessageType.Warning,
+                    _ => MessageType.Info
+                };
                 EditorGUILayout.HelpBox($"{issue.component}: {issue.issue}\nSuggestion: {issue.suggestion}", type);
             }
 
@@ -2274,7 +2567,37 @@ namespace Nyxara.AICompanion.Editor
             EditorGUILayout.LabelField($"Signal: {snapshot.lastSignal}");
             EditorGUILayout.LabelField($"Dialogue: {snapshot.lastDialogue}", EditorStyles.wordWrappedMiniLabel);
             EditorGUILayout.LabelField($"Speaking: {snapshot.isSpeaking}  Thinking: {snapshot.isThinking}");
-            EditorGUILayout.LabelField($"Memory Entries: {snapshot.memoryCount}");
+            EditorGUILayout.LabelField($"Working Memory: {snapshot.memoryCount}");
+            EditorGUILayout.LabelField($"Saved Event Memory: {snapshot.savedEventMemoryCount}");
+            EditorGUILayout.LabelField($"Saved Relationship Memory: {snapshot.savedRelationshipMemoryCount}");
+            if (!string.IsNullOrWhiteSpace(snapshot.memoryStorageSummary))
+            {
+                EditorGUILayout.LabelField($"Storage: {snapshot.memoryStorageSummary}", EditorStyles.wordWrappedMiniLabel);
+            }
+            EditorGUILayout.EndVertical();
+        }
+
+        private void DrawRuntimeMemorySection(NyxaraCompanionBrain brain)
+        {
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Memory Status", EditorStyles.boldLabel);
+
+            var memoryController = brain != null ? brain.MemoryController : null;
+            if (memoryController == null)
+            {
+                EditorGUILayout.HelpBox("No RecentMemoryController is attached to the active Nyxara brain.", MessageType.Info);
+                EditorGUILayout.EndVertical();
+                return;
+            }
+
+            EditorGUILayout.LabelField($"Working Memory Entries: {memoryController.GetMemoryCount()}");
+            EditorGUILayout.LabelField($"Saved Event Memory Entries: {memoryController.GetSavedEventCount()}");
+            EditorGUILayout.LabelField($"Saved Relationship Memory Entries: {memoryController.GetSavedRelationshipEventCount()}");
+            EditorGUILayout.LabelField("Storage Summary");
+            EditorGUILayout.LabelField(memoryController.GetMemoryStorageSummary(), EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.HelpBox(
+                "Working memory is short-term scene context. Event memory stores structured JSON conversation events. Relationship memory stores meaningful long-term shifts like trust or affection changes.",
+                MessageType.None);
             EditorGUILayout.EndVertical();
         }
 
@@ -2284,6 +2607,21 @@ namespace Nyxara.AICompanion.Editor
             EditorGUILayout.LabelField(status.name, EditorStyles.boldLabel);
             EditorGUILayout.LabelField(status.statusMessage ?? string.Empty, EditorStyles.wordWrappedMiniLabel);
             EditorGUILayout.LabelField(string.IsNullOrWhiteSpace(status.stateLabel) ? (status.isOperational ? "Operational" : "Offline") : status.stateLabel, EditorStyles.miniLabel);
+            if (!string.IsNullOrWhiteSpace(status.recommendedAction))
+            {
+                EditorGUILayout.HelpBox(status.recommendedAction, status.isOperational ? MessageType.Info : MessageType.Warning);
+            }
+
+            if (status.details != null)
+            {
+                foreach (var detail in status.details)
+                {
+                    if (!string.IsNullOrWhiteSpace(detail))
+                    {
+                        EditorGUILayout.LabelField(detail, EditorStyles.wordWrappedMiniLabel);
+                    }
+                }
+            }
             EditorGUILayout.EndVertical();
         }
 
@@ -2349,6 +2687,26 @@ namespace Nyxara.AICompanion.Editor
                 }
             }
 
+            if (report.findings != null)
+            {
+                foreach (var finding in report.findings)
+                {
+                    var findingMessage = $"[Nyxara Scan][Finding] {finding.title}: {finding.message}";
+                    switch (finding.severity)
+                    {
+                        case DiagnosticSeverity.Error:
+                            Debug.LogError(findingMessage);
+                            break;
+                        case DiagnosticSeverity.Warning:
+                            Debug.LogWarning(findingMessage);
+                            break;
+                        default:
+                            Debug.Log(findingMessage);
+                            break;
+                    }
+                }
+            }
+
             foreach (var path in report.pathValidations)
             {
                 Debug.Log($"[Nyxara Scan][Path] {path.name}: {(path.exists ? "Found" : "Missing")} | {path.path}");
@@ -2371,6 +2729,32 @@ namespace Nyxara.AICompanion.Editor
             {
                 Debug.Log(message);
             }
+
+            if (!string.IsNullOrWhiteSpace(status.recommendedAction))
+            {
+                Debug.Log($"[Nyxara Scan][Advice] {status.name}: {status.recommendedAction}");
+            }
+
+            if (status.details != null)
+            {
+                foreach (var detail in status.details)
+                {
+                    if (!string.IsNullOrWhiteSpace(detail))
+                    {
+                        Debug.Log($"[Nyxara Scan][Detail] {status.name}: {detail}");
+                    }
+                }
+            }
+        }
+
+        private static MessageType ToEditorMessageType(DiagnosticSeverity severity)
+        {
+            return severity switch
+            {
+                DiagnosticSeverity.Error => MessageType.Error,
+                DiagnosticSeverity.Warning => MessageType.Warning,
+                _ => MessageType.Info
+            };
         }
 
         private static Color GetLogColor(LogType type)
@@ -2514,6 +2898,7 @@ namespace Nyxara.AICompanion.Editor
             _selectedExpressionPreset = null;
             _expressionModeEnabled = false;
             _llmTestReply = string.Empty;
+            _runtimeReplyText = string.Empty;
             _fullSystemTestStatus = string.Empty;
             _microphoneTranscript = string.Empty;
             _testingVoiceClip = LoadDefaultTestingVoiceClip();
@@ -2597,6 +2982,47 @@ namespace Nyxara.AICompanion.Editor
             }
         }
 
+        private void SyncRuntimeReplyText(NyxaraCompanionBrain brain)
+        {
+            if (brain == null)
+            {
+                _runtimeReplyText = string.Empty;
+                return;
+            }
+
+            _runtimeReplyText = brain.LastReply ?? string.Empty;
+        }
+
+        private void DrawRuntimeReplyOutputSection(NyxaraCompanionBrain brain, PiperTtsService ttsService)
+        {
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Runtime Reply Output", EditorStyles.miniBoldLabel);
+
+            if (brain == null)
+            {
+                EditorGUILayout.HelpBox("No NyxaraCompanionBrain found in the active studio root, so live reply text cannot be shown here yet.", MessageType.Warning);
+                EditorGUILayout.EndVertical();
+                return;
+            }
+
+            var voiceState = ttsService != null && ttsService.IsConfigured
+                ? "Voice output available"
+                : "Voice output unavailable or disabled";
+            EditorGUILayout.HelpBox($"Reply text is always the primary output. {voiceState}; TTS is optional and uses the same reply text only when voice is enabled.", MessageType.None);
+
+            if (string.IsNullOrWhiteSpace(_runtimeReplyText))
+            {
+                EditorGUILayout.LabelField("Last Reply Text", "<no reply yet>");
+            }
+            else
+            {
+                EditorGUILayout.LabelField("Last Reply Text", EditorStyles.miniBoldLabel);
+                EditorGUILayout.TextArea(_runtimeReplyText, GUILayout.MinHeight(60f));
+            }
+
+            EditorGUILayout.EndVertical();
+        }
+
         private bool ApplyLipSliderRange(string controlKey, float startValue, float endValue)
         {
             var changed = false;
@@ -2660,6 +3086,7 @@ namespace Nyxara.AICompanion.Editor
             config.autoAttachBootstrap = true;
             config.enableRuntimeConversationOverlay = true;
             config.showRuntimeConversationOverlay = true;
+            config.enableSmartVoiceCapture = false;
             config.runtimeMicHoldKey = KeyCode.V;
             config.runtimePromptPopupKey = KeyCode.T;
 
@@ -3082,6 +3509,8 @@ namespace Nyxara.AICompanion.Editor
             {
                 var recommendedPreset = profiles.Contains("CC/Reallusion", StringComparer.OrdinalIgnoreCase)
                     ? "CC/Reallusion"
+                    : profiles.Contains("VRM", StringComparer.OrdinalIgnoreCase)
+                        ? "VRM"
                     : profiles.Contains("Viseme/VTuber", StringComparer.OrdinalIgnoreCase)
                         ? "Viseme/VTuber"
                         : profiles.Contains("Unreal/MetaHuman-like", StringComparer.OrdinalIgnoreCase)
@@ -3194,13 +3623,14 @@ namespace Nyxara.AICompanion.Editor
             }
 
             var detected = ExpressionBuilderHelper.AutoDetectBlendshapes(renderers);
-            _lipSyncData.visemeMappings = BuildCompatibilityVisemeMappings(detected);
+            var profiles = ExpressionBuilderHelper.DetectCompatibilityProfiles(ExpressionBuilderHelper.GetBlendshapeNames(renderers));
+            _lipSyncData.visemeMappings = BuildCompatibilityVisemeMappings(detected, profiles);
             EditorUtility.SetDirty(_lipSyncData);
             AssetDatabase.SaveAssets();
-            Debug.Log($"[Nyxara LipSync] Generated compatibility lip sync mapping for profile(s): {string.Join(", ", ExpressionBuilderHelper.DetectCompatibilityProfiles(ExpressionBuilderHelper.GetBlendshapeNames(renderers)))}");
+            Debug.Log($"[Nyxara LipSync] Generated compatibility lip sync mapping for profile(s): {string.Join(", ", profiles)}");
         }
 
-        private static List<VisemeMapping> BuildCompatibilityVisemeMappings(IReadOnlyDictionary<string, string> detected)
+        private static List<VisemeMapping> BuildCompatibilityVisemeMappings(IReadOnlyDictionary<string, string> detected, IReadOnlyCollection<string> profiles)
         {
             string Join(params string[] keys)
             {
@@ -3224,6 +3654,42 @@ namespace Nyxara.AICompanion.Editor
                 }
 
                 return string.Empty;
+            }
+
+            var useVrmProfile = profiles != null && profiles.Contains("VRM", StringComparer.OrdinalIgnoreCase);
+            if (useVrmProfile)
+            {
+                return new List<VisemeMapping>
+                {
+                    new() { viseme = Viseme.AA, blendshapeName = Pick("jawOpen"), intensity = 78f, jawOpenContribution = 0.95f },
+                    new() { viseme = Viseme.AH, blendshapeName = Pick("jawOpen"), intensity = 72f, jawOpenContribution = 0.9f },
+                    new() { viseme = Viseme.IY, blendshapeName = Join("mouthStretchLeft", "mouthStretchRight", "mouthSmileLeft", "mouthSmileRight"), intensity = 70f, jawOpenContribution = 0.08f },
+                    new() { viseme = Viseme.IH, blendshapeName = Join("mouthStretchLeft", "mouthStretchRight"), intensity = 54f, jawOpenContribution = 0.06f },
+                    new() { viseme = Viseme.UH, blendshapeName = Pick("mouthPucker"), intensity = 68f, jawOpenContribution = 0.08f },
+                    new() { viseme = Viseme.OW, blendshapeName = Join("mouthFunnel", "mouthPucker"), intensity = 72f, jawOpenContribution = 0.14f },
+                    new() { viseme = Viseme.AO, blendshapeName = Join("mouthFunnel", "mouthPucker"), intensity = 64f, jawOpenContribution = 0.12f },
+                    new() { viseme = Viseme.AW, blendshapeName = Join("jawOpen", "mouthFunnel"), intensity = 62f, jawOpenContribution = 0.32f },
+                    new() { viseme = Viseme.OY, blendshapeName = Join("mouthFunnel", "mouthStretchLeft", "mouthStretchRight"), intensity = 54f, jawOpenContribution = 0.1f },
+                    new() { viseme = Viseme.W, blendshapeName = Pick("mouthPucker"), intensity = 60f, jawOpenContribution = 0.05f },
+                    new() { viseme = Viseme.EH, blendshapeName = Join("mouthStretchLeft", "mouthStretchRight"), intensity = 56f, jawOpenContribution = 0.08f },
+                    new() { viseme = Viseme.ER, blendshapeName = Join("mouthFunnel", "mouthStretchLeft", "mouthStretchRight"), intensity = 42f, jawOpenContribution = 0.08f },
+                    new() { viseme = Viseme.FV, blendshapeName = Pick("mouthClose"), intensity = 40f, jawOpenContribution = 0.02f },
+                    new() { viseme = Viseme.TH, blendshapeName = Pick("jawOpen"), intensity = 28f, jawOpenContribution = 0.25f },
+                    new() { viseme = Viseme.DH, blendshapeName = Pick("jawOpen"), intensity = 24f, jawOpenContribution = 0.2f },
+                    new() { viseme = Viseme.SZ, blendshapeName = Join("mouthStretchLeft", "mouthStretchRight"), intensity = 34f, jawOpenContribution = 0.02f },
+                    new() { viseme = Viseme.SH, blendshapeName = Join("mouthPucker", "mouthFunnel"), intensity = 40f, jawOpenContribution = 0.04f },
+                    new() { viseme = Viseme.HH, blendshapeName = Pick("jawOpen"), intensity = 20f, jawOpenContribution = 0.2f },
+                    new() { viseme = Viseme.M, blendshapeName = Pick("mouthClose"), intensity = 68f, jawOpenContribution = 0f },
+                    new() { viseme = Viseme.BPM, blendshapeName = Pick("mouthClose"), intensity = 72f, jawOpenContribution = 0f },
+                    new() { viseme = Viseme.N, blendshapeName = Pick("mouthClose"), intensity = 36f, jawOpenContribution = 0.04f },
+                    new() { viseme = Viseme.NG, blendshapeName = Pick("mouthClose"), intensity = 30f, jawOpenContribution = 0.06f },
+                    new() { viseme = Viseme.L, blendshapeName = Pick("jawOpen"), intensity = 24f, jawOpenContribution = 0.16f },
+                    new() { viseme = Viseme.R, blendshapeName = Join("mouthPucker", "jawOpen"), intensity = 34f, jawOpenContribution = 0.12f },
+                    new() { viseme = Viseme.Y, blendshapeName = Join("mouthStretchLeft", "mouthStretchRight", "mouthSmileLeft", "mouthSmileRight"), intensity = 40f, jawOpenContribution = 0.05f },
+                    new() { viseme = Viseme.DT, blendshapeName = Pick("mouthClose"), intensity = 22f, jawOpenContribution = 0.04f },
+                    new() { viseme = Viseme.GK, blendshapeName = Pick("jawOpen"), intensity = 24f, jawOpenContribution = 0.15f },
+                    new() { viseme = Viseme.sil, blendshapeName = Pick("mouthClose"), intensity = 0f, jawOpenContribution = 0f }
+                };
             }
 
             return new List<VisemeMapping>
@@ -3691,7 +4157,8 @@ namespace Nyxara.AICompanion.Editor
             }
 
             var detected = ExpressionBuilderHelper.AutoDetectBlendshapes(renderers);
-            var newMappings = BuildCompatibilityVisemeMappings(detected);
+            var profiles = ExpressionBuilderHelper.DetectCompatibilityProfiles(ExpressionBuilderHelper.GetBlendshapeNames(renderers));
+            var newMappings = BuildCompatibilityVisemeMappings(detected, profiles);
             if (newMappings.Count == 0)
             {
                 return;
@@ -3719,7 +4186,6 @@ namespace Nyxara.AICompanion.Editor
 
             if (logChange)
             {
-                var profiles = ExpressionBuilderHelper.DetectCompatibilityProfiles(ExpressionBuilderHelper.GetBlendshapeNames(renderers));
                 Debug.Log($"[Nyxara LipSync] Refreshed runtime lip sync mapping for profile(s): {string.Join(", ", profiles)}");
             }
         }
@@ -3995,8 +4461,12 @@ namespace Nyxara.AICompanion.Editor
                     : PiperTtsService.EvaluateAvailabilityStatus(_config.ttsEnabled, _config.piperExecutablePath, _config.piperVoicePath);
 
                 report.timestamp = DateTime.Now.ToString("HH:mm:ss");
-                report.llmStatus = CheckStatus("LLM (Qwen)", brain != null, brain != null && brain.IsLlmAvailable, TryGetLlmModelPath(llmAgent, out var liveLlmPath) ? liveLlmPath : "Missing LLM or model");
-                report.sttStatus = CheckStatus("STT (Whisper)", whisperInput != null, whisperInput != null && whisperInput.IsWhisperAvailable, whisperInput != null && whisperInput.IsWhisperAvailable ? "Configured" : "Missing WhisperManager");
+                var llmOperational = brain != null && brain.IsLlmAvailable;
+                var llmMessage = TryGetLlmModelPath(llmAgent, out var liveLlmPath)
+                    ? liveLlmPath
+                    : (llmOperational ? "Runtime is active" : "Missing LLM or model");
+                report.llmStatus = CheckStatus("LLM (Qwen)", brain != null, llmOperational, llmMessage);
+                report.sttStatus = CheckStatus("Player Voice Input (Whisper)", whisperInput != null, whisperInput != null && whisperInput.IsWhisperAvailable, whisperInput != null && whisperInput.IsWhisperAvailable ? "Configured" : "Missing WhisperManager");
                 report.ttsStatus = CheckStatus("TTS (Piper)", ttsService != null || _config.ttsEnabled, ttsAvailabilityStatus != PiperTtsAvailabilityStatus.InvalidPath, PiperTtsService.GetStatusGuidance(ttsAvailabilityStatus));
                 report.ttsStatus.stateLabel = PiperTtsService.GetStatusLabel(ttsAvailabilityStatus);
                 report.ttsStatus.affectsOverallHealth = false;
@@ -4005,12 +4475,14 @@ namespace Nyxara.AICompanion.Editor
                 report.expressionStatus = CheckStatus("Expression Library", expressionLibrary != null, expressionLibrary != null, expressionLibrary != null ? "Installed" : "Optional component missing");
 
                 report.configIssues = new List<ConfigIssue>();
+                report.findings = new List<DiagnosticFinding>();
                 if (_config.sourceCharacterPrefab == null)
                 {
                     report.configIssues.Add(new ConfigIssue { severity = IssueSeverity.Critical, component = "Studio", issue = "No source character assigned", suggestion = "Assign the model or prefab in the Studio tab" });
                 }
 
                 AppendLiveLlmDiagnostics(report, llmAgent);
+                AppendSttDiagnostics(report, whisperInput);
 
                 if (string.IsNullOrWhiteSpace(_config.preferredFaceRendererPath))
                 {
@@ -4114,6 +4586,95 @@ namespace Nyxara.AICompanion.Editor
                         component = "LLM",
                         issue = $"Live numPredict is {numPredict}, which may slow replies",
                         suggestion = "Lower numPredict on the live root if you want faster spoken response turns"
+                    });
+                }
+            }
+
+            private static void AppendSttDiagnostics(SystemDiagnosticsReport report, WhisperMicrophoneInput whisperInput)
+            {
+                if (report == null || whisperInput == null)
+                {
+                    return;
+                }
+
+                report.sttStatus.details.Add($"Mic devices: {whisperInput.AvailableMicrophones.Length}");
+                report.sttStatus.details.Add($"Resolved mic: {whisperInput.ActiveMicrophoneDevice ?? "<default>"}");
+                report.sttStatus.details.Add($"Mic route: {whisperInput.LastResolvedMicrophoneRoute}");
+                report.sttStatus.details.Add($"Capture mode: {whisperInput.CaptureModeLabel}");
+                report.sttStatus.details.Add($"Capture failure mode: {whisperInput.LastCaptureFailureMode}");
+                report.sttStatus.details.Add($"Last raw STT: {(!string.IsNullOrWhiteSpace(whisperInput.LastRawTranscript) ? whisperInput.LastRawTranscript : "<empty>")}");
+                report.sttStatus.details.Add($"Last normalized STT: {(!string.IsNullOrWhiteSpace(whisperInput.LastNormalizedTranscript) ? whisperInput.LastNormalizedTranscript : "<empty>")}");
+                report.sttStatus.details.Add($"Rejected transcript debug bypass: {(whisperInput.AllowRejectedTranscriptsInDebug ? "enabled" : "disabled")}");
+                report.sttStatus.details.Add($"Music-like transcript bypass: {(whisperInput.AllowMusicLikeTranscriptsInDebug ? "enabled" : "disabled")}");
+                report.sttStatus.details.Add($"Quiet rejection bypass: {(whisperInput.BypassQuietCaptureRejectionInDebug ? "enabled" : "disabled")}");
+                report.sttStatus.details.Add($"Explicit mic selection: {(whisperInput.ForceExplicitMicrophoneSelection ? "enabled" : "disabled")}");
+                report.sttStatus.details.Add($"Speech gate: RMS >= {whisperInput.MinRmsForSpeech:0.0000}, Peak >= {whisperInput.MinPeakForSpeech:0.0000}, PreGain {whisperInput.PreTranscriptionGain:0.00}x");
+                report.sttStatus.details.Add($"Transcript filters: Music {(whisperInput.RejectMusicLikeTranscripts ? "enabled" : "disabled")} | Bracket tags {(whisperInput.RejectBracketedNonSpeechTags ? "enabled" : "disabled")}");
+                report.sttStatus.details.Add($"Last audio stats: {whisperInput.LastRecordingDurationSeconds:0.00}s | RMS {whisperInput.LastRecordingRms:0.0000} | Peak {whisperInput.LastRecordingPeak:0.0000} | Gain {whisperInput.LastAppliedPreampGain:0.00}x");
+                report.sttStatus.details.Add($"Last forwarding decision: {whisperInput.LastForwardingDecision}");
+                report.sttStatus.recommendedAction = whisperInput.GetLikelySpeechIssue();
+
+                if (whisperInput.AvailableMicrophones.Length == 0)
+                {
+                    report.findings.Add(new DiagnosticFinding
+                    {
+                        severity = DiagnosticSeverity.Error,
+                        title = "No Microphone Devices",
+                        message = "Unity does not currently detect any microphone input devices for Whisper."
+                    });
+                    return;
+                }
+
+                if (whisperInput.AvailableMicrophones.Length == 1)
+                {
+                    report.findings.Add(new DiagnosticFinding
+                    {
+                        severity = DiagnosticSeverity.Info,
+                        title = "Single Player Mic Visible",
+                        message = "Unity currently sees one player microphone device. If speech is still missed, verify the Windows default input route and microphone privacy permissions."
+                    });
+                }
+
+                if (whisperInput.ForceExplicitMicrophoneSelection)
+                {
+                    report.findings.Add(new DiagnosticFinding
+                    {
+                        severity = DiagnosticSeverity.Info,
+                        title = "Using Explicit Mic",
+                        message = whisperInput.LastResolvedMicrophoneRoute
+                    });
+                }
+
+                if (!string.IsNullOrWhiteSpace(whisperInput.LastRawTranscript))
+                {
+                    report.findings.Add(new DiagnosticFinding
+                    {
+                        severity = DiagnosticSeverity.Warning,
+                        title = "Recent STT Diagnosis",
+                        message = $"{whisperInput.LastRawTranscript} -> {whisperInput.GetLikelySpeechIssue()}"
+                    });
+                }
+
+                if (whisperInput.LastTranscriptWasRejected)
+                {
+                    report.findings.Add(new DiagnosticFinding
+                    {
+                        severity = (whisperInput.AllowRejectedTranscriptsInDebug || whisperInput.BypassQuietCaptureRejectionInDebug) && whisperInput.LastTranscriptDebugBypassUsed
+                            ? DiagnosticSeverity.Info
+                            : DiagnosticSeverity.Warning,
+                        title = "Transcript Rejected",
+                        message = (whisperInput.AllowRejectedTranscriptsInDebug || whisperInput.BypassQuietCaptureRejectionInDebug) && whisperInput.LastTranscriptDebugBypassUsed
+                            ? $"Rejected as '{whisperInput.LastRejectedTranscriptReason}', but allowed through debug bypass."
+                            : $"Rejected as '{whisperInput.LastRejectedTranscriptReason}'."
+                    });
+                }
+                else if (!string.IsNullOrWhiteSpace(whisperInput.LastNormalizedTranscript))
+                {
+                    report.findings.Add(new DiagnosticFinding
+                    {
+                        severity = whisperInput.LastTranscriptForwardedToBrain ? DiagnosticSeverity.Info : DiagnosticSeverity.Warning,
+                        title = whisperInput.LastTranscriptForwardedToBrain ? "Transcript Accepted" : "Transcript Accepted But Not Forwarded",
+                        message = whisperInput.LastForwardingDecision
                     });
                 }
             }

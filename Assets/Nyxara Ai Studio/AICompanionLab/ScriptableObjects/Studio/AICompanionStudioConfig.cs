@@ -47,6 +47,7 @@ namespace Nyxara.AICompanion.Studio
         [Header("Runtime Input")]
         public bool enableRuntimeConversationOverlay = true;
         public bool showRuntimeConversationOverlay = true;
+        public bool enableSmartVoiceCapture = false;
         public KeyCode runtimeMicHoldKey = KeyCode.V;
         public KeyCode runtimePromptPopupKey = KeyCode.T;
 
